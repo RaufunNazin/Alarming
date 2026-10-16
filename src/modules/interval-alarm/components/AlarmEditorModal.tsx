@@ -7,8 +7,9 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
+  Alert,
 } from 'react-native';
-import { Sparkles, Minus, Plus } from 'lucide-react-native';
+import { Sparkles, Minus, Plus, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../../core/theme';
 import { AlarmItem, AlarmType } from '../types';
@@ -25,6 +26,7 @@ interface AlarmEditorModalProps {
   initialAlarm?: AlarmItem | null;
   onClose: () => void;
   onSave: (alarmData: Omit<AlarmItem, 'id'>) => void;
+  onDelete?: (id: string) => void;
 }
 
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -34,6 +36,7 @@ export const AlarmEditorModal: React.FC<AlarmEditorModalProps> = ({
   initialAlarm,
   onClose,
   onSave,
+  onDelete,
 }) => {
   const { colors, typography, radii, spacing, shadows } = useTheme();
 
@@ -145,6 +148,22 @@ export const AlarmEditorModal: React.FC<AlarmEditorModalProps> = ({
       dismissedForToday: false,
     });
     onClose();
+  };
+
+  const handleDelete = () => {
+    if (!initialAlarm || !onDelete) return;
+    Alert.alert('Delete Alarm', 'Are you sure you want to delete this alarm?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          onDelete(initialAlarm.id);
+          onClose();
+        },
+      },
+    ]);
   };
 
   const currentDialHour =
@@ -666,6 +685,33 @@ export const AlarmEditorModal: React.FC<AlarmEditorModalProps> = ({
                 )}
               </View>
             )}
+
+            {/* Clean Delete Action at bottom of modal when editing */}
+            {initialAlarm && onDelete && (
+              <View style={styles.deleteSection}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={handleDelete}
+                  style={[
+                    styles.deleteAlarmBtn,
+                    {
+                      borderColor: colors.danger,
+                      borderRadius: radii.buttonLarge,
+                    },
+                  ]}
+                >
+                  <Trash2 size={18} color={colors.danger} strokeWidth={2.2} />
+                  <Text
+                    style={[
+                      styles.deleteAlarmBtnText,
+                      { color: colors.danger, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    Delete Alarm
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -837,5 +883,21 @@ const styles = StyleSheet.create({
   },
   snapPillText: {
     fontSize: 12,
+  },
+  deleteSection: {
+    marginTop: 10,
+    marginBottom: 16,
+  },
+  deleteAlarmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    width: '100%',
+  },
+  deleteAlarmBtnText: {
+    fontSize: 15,
   },
 });

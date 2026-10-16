@@ -5,11 +5,12 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
+  StatusBar as RNStatusBar,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus, BellRing } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../core/theme';
 import { useAlarmStore } from './store/alarmStore';
@@ -22,7 +23,8 @@ import { AlarmEditorModal } from './components/AlarmEditorModal';
 import { AlarmRingingOverlay } from './components/AlarmRingingOverlay';
 
 export const IntervalAlarmScreen: React.FC = () => {
-  const { colors, typography, radii, shadows, spacing, mode } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { colors, typography, radii, shadows, spacing } = useTheme();
   const {
     alarms,
     addAlarm,
@@ -36,10 +38,10 @@ export const IntervalAlarmScreen: React.FC = () => {
   const [editingAlarm, setEditingAlarm] = useState<AlarmItem | null>(null);
   const [countdownText, setCountdownText] = useState<string>('No upcoming alarms');
 
-  // Find next upcoming alarm for the Hero card
+  // Find next upcoming enabled alarm for the Hero card
   const upcomingInfo = findNextUpcomingAlarm(alarms);
 
-  // Dynamic countdown timer (updates every minute)
+  // Dynamic countdown timer (updates reactively on alarm change and every 30s)
   useEffect(() => {
     const updateCountdown = () => {
       const info = findNextUpcomingAlarm(alarms);
@@ -89,25 +91,37 @@ export const IntervalAlarmScreen: React.FC = () => {
     }
   };
 
+  // Status bar inset calculation for Android & iOS
+  const topInset = Math.max(insets.top, RNStatusBar.currentHeight ?? 0, 20);
+  const bottomInset = Math.max(insets.bottom, 16);
+
   return (
     <View style={styles.rootContainer}>
-      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style="light" />
 
-      {/* Subtle non-distracting atmospheric canvas gradient */}
+      {/* Subtle atmospheric canvas gradient */}
       <LinearGradient
         colors={[colors.canvasGradientStart, colors.canvasGradientEnd]}
         style={StyleSheet.absoluteFill}
       />
 
-      <SafeAreaView style={styles.safeArea}>
-        {/* Love Note Greeting & Theme Toggle */}
+      <View
+        style={[
+          styles.safeAreaContainer,
+          {
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
+        ]}
+      >
+        {/* Serene Love Note Greeting (with ample status bar clearance) */}
         <GreetingHeader />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 110 }}
         >
-          {/* Top Hero Alarm Card */}
+          {/* Top Hero Alarm Card (Distinctly styled and reactively switches to next enabled alarm) */}
           {upcomingInfo?.nextAlarm ? (
             <HeroAlarmCard
               alarm={upcomingInfo.nextAlarm}
@@ -120,7 +134,7 @@ export const IntervalAlarmScreen: React.FC = () => {
               style={[
                 styles.emptyHeroCard,
                 {
-                  backgroundColor: colors.surface,
+                  backgroundColor: colors.surfaceHero,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.cardOuter,
                   marginHorizontal: spacing.lg,
@@ -135,7 +149,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                   { color: colors.textPrimary, fontFamily: typography.numbersBold },
                 ]}
               >
-                No Active Alarms
+                All Alarms Are Paused
               </Text>
               <Text
                 style={[
@@ -143,7 +157,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                   { color: colors.textMuted, fontFamily: typography.numbersRegular },
                 ]}
               >
-                Tap the (+) button below to schedule your morning interval alarms or single wake-up.
+                Toggle any alarm on below or tap the (+) button to create a new one.
               </Text>
             </View>
           )}
@@ -196,7 +210,6 @@ export const IntervalAlarmScreen: React.FC = () => {
               alarm={alarm}
               onPressCard={() => handleOpenEditModal(alarm)}
               onToggle={() => toggleAlarm(alarm.id)}
-              onDelete={() => deleteAlarm(alarm.id)}
             />
           ))}
         </ScrollView>
@@ -211,6 +224,7 @@ export const IntervalAlarmScreen: React.FC = () => {
             {
               backgroundColor: colors.primary,
               borderRadius: radii.squircleToggle,
+              bottom: bottomInset + 20,
             },
           ]}
           accessibilityLabel="Add new alarm"
@@ -224,11 +238,12 @@ export const IntervalAlarmScreen: React.FC = () => {
           initialAlarm={editingAlarm}
           onClose={() => setEditorVisible(false)}
           onSave={handleSaveAlarm}
+          onDelete={deleteAlarm}
         />
 
         {/* Active Ringing Overlay with Dismiss All Remaining */}
         <AlarmRingingOverlay />
-      </SafeAreaView>
+      </View>
     </View>
   );
 };
@@ -237,16 +252,16 @@ const styles = StyleSheet.create({
   rootContainer: {
     flex: 1,
   },
-  safeArea: {
+  safeAreaContainer: {
     flex: 1,
   },
   emptyHeroCard: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyHeroTitle: {
-    fontSize: 20,
+    fontSize: 18,
     marginBottom: 6,
   },
   emptyHeroSub: {
@@ -278,7 +293,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 24,
-    bottom: 30,
     width: 60,
     height: 60,
     justifyContent: 'center',

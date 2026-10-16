@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Clock, Repeat, Trash2 } from 'lucide-react-native';
+import { Clock, Repeat } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { AlarmItem } from '../types';
 import {
@@ -14,14 +14,12 @@ interface AlarmCardItemProps {
   alarm: AlarmItem;
   onPressCard: () => void;
   onToggle: () => void;
-  onDelete: () => void;
 }
 
 export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
   alarm,
   onPressCard,
   onToggle,
-  onDelete,
 }) => {
   const { colors, typography, radii, shadows, spacing } = useTheme();
 
@@ -46,25 +44,28 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
   const repeatStr = formatRepeatDays(alarm.repeatDays);
 
   return (
-    <View style={{ marginHorizontal: spacing.lg, marginVertical: 6 }}>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={onPressCard}
+    <View style={{ marginHorizontal: spacing.lg, marginVertical: 5 }}>
+      {/* Sibling container: Cleanly separates card editing tap from squircle toggle tap */}
+      <View
         style={[
-          styles.card,
+          styles.cardContainer,
           shadows.card,
           {
             backgroundColor: colors.surface,
             borderColor: colors.surfaceBorder,
             borderRadius: radii.cardOuter,
             padding: spacing.md,
-            opacity: alarm.isEnabled ? 1 : 0.75,
+            opacity: alarm.isEnabled ? 1 : 0.65,
           },
         ]}
       >
         <View style={styles.contentRow}>
-          {/* Left Info Column */}
-          <View style={styles.infoCol}>
+          {/* Left Info Column (Pressable to open Edit Modal) */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={onPressCard}
+            style={styles.infoColPressable}
+          >
             <Text
               style={[
                 styles.timeText,
@@ -144,32 +145,20 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
                 </Text>
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
 
-          {/* Right Action Column */}
-          <View style={styles.actionsCol}>
+          {/* Right Sibling: Squircle Toggle Button (No awkward delete button below!) */}
+          <View style={styles.toggleWrapper}>
             <SquircleToggleButton isEnabled={alarm.isEnabled} onToggle={onToggle} />
-
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              style={styles.deleteBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Trash2 size={16} color={colors.textMuted} strokeWidth={1.8} />
-            </TouchableOpacity>
           </View>
         </View>
-      </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  card: {
+  cardContainer: {
     borderWidth: 1,
   },
   contentRow: {
@@ -177,7 +166,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  infoCol: {
+  infoColPressable: {
     flex: 1,
     paddingRight: 10,
   },
@@ -205,13 +194,9 @@ const styles = StyleSheet.create({
   metaChipText: {
     fontSize: 11,
   },
-  actionsCol: {
+  toggleWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-  },
-  deleteBtn: {
-    padding: 4,
-    opacity: 0.6,
+    paddingLeft: 4,
   },
 });

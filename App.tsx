@@ -14,6 +14,7 @@ import {
   Outfit_700Bold,
 } from '@expo-google-fonts/outfit';
 import * as Notifications from 'expo-notifications';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from './src/core/theme';
 import { getActiveModule } from './src/modules/registry';
 import { useAlarmStore } from './src/modules/interval-alarm/store/alarmStore';
@@ -101,7 +102,7 @@ export default function App() {
   if (!fontsLoaded) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#E11D48" />
+        <ActivityIndicator size="large" color="#C9939B" />
       </View>
     );
   }
@@ -109,9 +110,11 @@ export default function App() {
   const ActiveScreen = getActiveModule();
 
   return (
-    <ThemeProvider>
-      <ActiveScreen />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ActiveScreen />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 

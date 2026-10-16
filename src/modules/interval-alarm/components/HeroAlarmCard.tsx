@@ -47,34 +47,61 @@ export const HeroAlarmCard: React.FC<HeroAlarmCardProps> = ({
 
   return (
     <View style={{ marginHorizontal: spacing.lg, marginVertical: spacing.sm }}>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={onPressCard}
+      {/* Sibling container: NOT a TouchableOpacity wrapping another TouchableOpacity */}
+      <View
         style={[
-          styles.card,
+          styles.cardContainer,
           shadows.card,
           {
-            backgroundColor: colors.surface,
-            borderColor: colors.surfaceBorder,
+            backgroundColor: colors.surfaceHero,
+            borderColor: colors.surfaceBorderHighlight,
             borderRadius: radii.cardOuter,
             padding: spacing.lg,
           },
         ]}
       >
         <View style={styles.contentRow}>
-          {/* Left Info Column */}
-          <View style={styles.infoCol}>
-            {/* Live Google Countdown Badge */}
-            <View style={styles.countdownBadge}>
-              <Sparkles size={13} color={colors.accentGold} strokeWidth={2.4} />
+          {/* Left Info Column (Pressable to edit) */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={onPressCard}
+            style={styles.infoColPressable}
+          >
+            {/* Distinct "Upcoming Next" Header Badge */}
+            <View style={styles.headerTagRow}>
+              <View
+                style={[
+                  styles.upcomingTag,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.surfaceBorderHighlight,
+                    borderRadius: radii.pill,
+                  },
+                ]}
+              >
+                <Sparkles size={12} color={colors.accentGold} strokeWidth={2.4} />
+                <Text
+                  style={[
+                    styles.upcomingTagText,
+                    {
+                      color: colors.accentGold,
+                      fontFamily: typography.numbersBold,
+                    },
+                  ]}
+                >
+                  NEXT ALARM
+                </Text>
+              </View>
+
               <Text
                 style={[
                   styles.countdownText,
                   {
-                    color: colors.accentGold,
-                    fontFamily: typography.numbersBold,
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersRegular,
                   },
                 ]}
+                numberOfLines={1}
               >
                 {countdownText}
               </Text>
@@ -100,7 +127,7 @@ export const HeroAlarmCard: React.FC<HeroAlarmCardProps> = ({
               style={[
                 styles.label,
                 {
-                  color: colors.textSecondary,
+                  color: colors.primary,
                   fontFamily: typography.cursive,
                 },
               ]}
@@ -122,7 +149,7 @@ export const HeroAlarmCard: React.FC<HeroAlarmCardProps> = ({
                     },
                   ]}
                 >
-                  <Clock size={12} color={colors.primary} strokeWidth={2.2} />
+                  <Clock size={11} color={colors.primary} strokeWidth={2.2} />
                   <Text
                     style={[
                       styles.metaChipText,
@@ -144,7 +171,7 @@ export const HeroAlarmCard: React.FC<HeroAlarmCardProps> = ({
                   },
                 ]}
               >
-                <Repeat size={12} color={colors.textSecondary} strokeWidth={2.2} />
+                <Repeat size={11} color={colors.textSecondary} strokeWidth={2.2} />
                 <Text
                   style={[
                     styles.metaChipText,
@@ -155,20 +182,20 @@ export const HeroAlarmCard: React.FC<HeroAlarmCardProps> = ({
                 </Text>
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
 
-          {/* Right Squircle Toggle Button (54x54px isolated) */}
+          {/* Right Sibling: Squircle Toggle Button (Independent touch responder) */}
           <View style={styles.toggleWrapper}>
             <SquircleToggleButton isEnabled={alarm.isEnabled} onToggle={onToggle} />
           </View>
         </View>
-      </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  card: {
+  cardContainer: {
     borderWidth: 1.5,
   },
   contentRow: {
@@ -176,19 +203,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  infoCol: {
+  infoColPressable: {
     flex: 1,
     paddingRight: 12,
   },
-  countdownBadge: {
+  headerTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    marginBottom: 4,
+    gap: 8,
+    marginBottom: 6,
+    flexWrap: 'wrap',
+  },
+  upcomingTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
+  upcomingTagText: {
+    fontSize: 10,
+    letterSpacing: 0.8,
   },
   countdownText: {
     fontSize: 12,
-    letterSpacing: 0.3,
+    flexShrink: 1,
   },
   timeText: {
     lineHeight: 40,
@@ -217,5 +257,6 @@ const styles = StyleSheet.create({
   toggleWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingLeft: 4,
   },
 });

@@ -48,7 +48,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 200, 500, 200, 500],
         enableLights: true,
-        lightColor: '#E11D48',
+        lightColor: '#C9939B',
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         bypassDnd: true,
         sound: 'default',

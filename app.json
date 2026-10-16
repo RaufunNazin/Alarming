@@ -12,7 +12,7 @@
     "android": {
       "package": "com.amour.alarm",
       "adaptiveIcon": {
-        "backgroundColor": "#130E14",
+        "backgroundColor": "#111012",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -36,7 +36,7 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#E11D48"
+          "color": "#C9939B"
         }
       ],
       "./plugins/withAndroidAlarmChannel.js"

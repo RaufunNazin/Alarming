@@ -26,10 +26,10 @@ export const Shadows = {
   } as ViewStyle,
 
   buttonPrimary: {
-    shadowColor: '#E11D48',
+    shadowColor: '#C9939B',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
   } as ViewStyle,
 };

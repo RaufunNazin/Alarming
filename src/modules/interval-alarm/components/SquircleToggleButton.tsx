@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, StyleSheet, GestureResponderEvent } from 'react-native';
+import { TouchableOpacity, StyleSheet } from 'react-native';
 import { Bell, BellOff } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../../core/theme';
@@ -17,9 +17,7 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = ({
 }) => {
   const { colors, radii, shadows } = useTheme();
 
-  const handlePress = (e: GestureResponderEvent) => {
-    // Explicitly prevent bubbling to card body
-    e.stopPropagation();
+  const handlePress = () => {
     Haptics.impactAsync(
       isEnabled
         ? Haptics.ImpactFeedbackStyle.Light
@@ -34,7 +32,7 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = ({
 
   return (
     <TouchableOpacity
-      activeOpacity={0.8}
+      activeOpacity={0.75}
       onPress={handlePress}
       style={[
         styles.squircle,
