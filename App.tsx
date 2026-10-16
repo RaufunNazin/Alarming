@@ -22,6 +22,8 @@ import {
   initializeAlarmNotifications,
   ACTION_DISMISS_ALL,
   ACTION_DISMISS_SINGLE,
+  ACTION_SNOOZE_NEXT,
+  ACTION_SNOOZE_SINGLE,
 } from './src/core/notifications/alarmNotifier';
 
 const WEB_INITIAL_METRICS = {
@@ -80,32 +82,47 @@ export default function App() {
     let subscription: Notifications.EventSubscription | null = null;
     let foregroundSubscription: Notifications.EventSubscription | null = null;
 
-    if (Platform.OS !== 'web') {
-      subscription = Notifications.addNotificationResponseReceivedListener(
-        (response) => {
-          const actionIdentifier = response.actionIdentifier;
-          const data = response.notification.request.content.data;
-          const alarmId = data?.alarmId as string;
+    const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+      const actionIdentifier = response.actionIdentifier;
+      const data = response.notification.request.content.data;
+      const alarmId = data?.alarmId as string;
 
-          if (actionIdentifier === ACTION_DISMISS_ALL && alarmId) {
-            dismissAllRemainingForToday(alarmId);
-          } else if (actionIdentifier === ACTION_DISMISS_SINGLE && alarmId) {
-            dismissSingleAlarm(alarmId);
-          } else if (alarmId) {
-            // User tapped notification directly: open ringing overlay
-            const currentAlarms = useAlarmStore.getState().alarms;
-            const target = currentAlarms.find((a) => a.id === alarmId);
-            if (target) {
-              setActiveRinging({
-                alarm: target,
-                currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
-                totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
-                currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
-              });
-            }
-          }
+      if (
+        (actionIdentifier === ACTION_SNOOZE_NEXT || actionIdentifier === ACTION_SNOOZE_SINGLE) &&
+        alarmId
+      ) {
+        const currentAlarms = useAlarmStore.getState().alarms;
+        const target = currentAlarms.find((a) => a.id === alarmId);
+        const snoozeDuration = target?.intervalMinutes || 10;
+        useAlarmStore.getState().snoozeAlarm(alarmId, snoozeDuration);
+      } else if (actionIdentifier === ACTION_DISMISS_ALL && alarmId) {
+        dismissAllRemainingForToday(alarmId);
+      } else if (actionIdentifier === ACTION_DISMISS_SINGLE && alarmId) {
+        dismissSingleAlarm(alarmId);
+      } else if (alarmId) {
+        // User tapped notification directly: open ringing overlay
+        const currentAlarms = useAlarmStore.getState().alarms;
+        const target = currentAlarms.find((a) => a.id === alarmId);
+        if (target) {
+          setActiveRinging({
+            alarm: target,
+            currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
+            totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
+            currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
+          });
         }
-      );
+      }
+    };
+
+    if (Platform.OS !== 'web') {
+      subscription = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
+
+      // Handle cold start launch from tapping a notification
+      Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
+        if (lastResponse) {
+          handleNotificationResponse(lastResponse);
+        }
+      });
 
       // Listen to incoming foreground notifications
       foregroundSubscription = Notifications.addNotificationReceivedListener(

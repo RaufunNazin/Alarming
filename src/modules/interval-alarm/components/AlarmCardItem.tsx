@@ -23,13 +23,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
 
   const scheduleStr = getSmartScheduleString(alarm);
   const timeDisplay = formatAlarmTimeDisplay(alarm);
-  const defaultLabel =
-    alarm.type === 'interval'
-      ? 'Morning Wakeup'
-      : alarm.type === 'offset'
-      ? 'Interval Wakeup'
-      : 'Alarm';
-  const labelDisplay = alarm.label.trim() || defaultLabel;
+  const trimmedLabel = alarm.label ? alarm.label.trim() : '';
 
   return (
     <View style={{ marginHorizontal: spacing.lg, marginVertical: 6 }}>
@@ -68,26 +62,30 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
               >
                 {scheduleStr}
               </Text>
-              <Text
-                style={[
-                  styles.separatorDot,
-                  { color: colors.textMuted },
-                ]}
-              >
-                •
-              </Text>
-              <Text
-                style={[
-                  styles.labelText,
-                  {
-                    color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
-                    fontFamily: typography.numbersRegular,
-                  },
-                ]}
-                numberOfLines={2}
-              >
-                {labelDisplay}
-              </Text>
+              {trimmedLabel ? (
+                <>
+                  <Text
+                    style={[
+                      styles.separatorDot,
+                      { color: colors.textMuted },
+                    ]}
+                  >
+                    •
+                  </Text>
+                  <Text
+                    style={[
+                      styles.labelText,
+                      {
+                        color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
+                        fontFamily: typography.numbersRegular,
+                      },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {trimmedLabel}
+                  </Text>
+                </>
+              ) : null}
             </View>
 
             {/* Time Display (Uniform sizing across all alarm types) */}

@@ -16,7 +16,6 @@ export const AlarmRingingOverlay: React.FC = () => {
   const { colors, typography, radii, shadows } = useTheme();
   const {
     activeRinging,
-    dismissAllRemainingForToday,
     dismissSingleAlarm,
     snoozeAlarm,
   } = useAlarmStore();
@@ -53,19 +52,16 @@ export const AlarmRingingOverlay: React.FC = () => {
   if (!activeRinging) return null;
 
   const isInterval = activeRinging.alarm.type === 'interval';
+  const snoozeDuration = activeRinging.alarm.intervalMinutes || 10;
 
   const handleDismiss = () => {
     alarmSoundPlayer.stopAlarmSound();
-    if (isInterval) {
-      dismissAllRemainingForToday(activeRinging.alarm.id);
-    } else {
-      dismissSingleAlarm(activeRinging.alarm.id);
-    }
+    dismissSingleAlarm(activeRinging.alarm.id);
   };
 
   const handleSnooze = () => {
     alarmSoundPlayer.stopAlarmSound();
-    snoozeAlarm(activeRinging.alarm.id, 10);
+    snoozeAlarm(activeRinging.alarm.id, snoozeDuration);
   };
 
   const currentStep = activeRinging.currentStepIndex ?? 0;
@@ -124,14 +120,16 @@ export const AlarmRingingOverlay: React.FC = () => {
           </Animated.View>
 
           <View style={styles.alarmInfoBadge}>
-            <Text
-              style={[
-                styles.alarmLabel,
-                { color: colors.textSecondary, fontFamily: typography.numbersBold },
-              ]}
-            >
-              {activeRinging.alarm.label || (isInterval ? 'Morning Wakeup' : 'Alarm')}
-            </Text>
+            {activeRinging.alarm.label ? (
+              <Text
+                style={[
+                  styles.alarmLabel,
+                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                ]}
+              >
+                {activeRinging.alarm.label}
+              </Text>
+            ) : null}
 
             {isInterval && (
               <Text
@@ -169,9 +167,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                   { color: colors.textSecondary, fontFamily: typography.numbersBold },
                 ]}
               >
-                {isInterval
-                  ? `SNOOZE (${activeRinging.alarm.intervalMinutes || 10}M)`
-                  : 'SNOOZE (10M)'}
+                {`SNOOZE (${snoozeDuration}M)`}
               </Text>
             </TouchableOpacity>
 
@@ -196,7 +192,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                   { color: '#FFFFFF', fontFamily: typography.numbersBold },
                 ]}
               >
-                {isInterval ? 'STOP ALL' : 'STOP'}
+                STOP
               </Text>
             </TouchableOpacity>
           </View>

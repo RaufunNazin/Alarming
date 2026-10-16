@@ -63,16 +63,14 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       setEndMinute(next.minute);
       setOffsetDirection('before');
       setAlarmCount(10);
-      setIntervalMinutes(currentType === 'offset' ? 5 : 10);
+      setIntervalMinutes(10);
     }
   }, [visible]);
 
   const handleSelectType = (type: AlarmType) => {
     setAlarmType(type);
     setActiveTimeTab('start');
-    if (type === 'offset' && intervalMinutes !== 5) {
-      setIntervalMinutes(5);
-    } else if (type === 'interval' && intervalMinutes !== 10) {
+    if (!intervalMinutes) {
       setIntervalMinutes(10);
     }
     setLastSelectedType(type);
@@ -109,16 +107,9 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       ).map((s) => s.timeString);
     }
 
-    const defaultLabelText =
-      alarmType === 'interval'
-        ? 'Morning Wakeup'
-        : alarmType === 'offset'
-        ? 'Interval Wakeup'
-        : 'Alarm';
-
     const newAlarm: Omit<AlarmItem, 'id'> = {
       type: alarmType,
-      label: defaultLabelText,
+      label: '',
       isEnabled: true,
       startHour,
       startMinute,
@@ -128,7 +119,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       alarmCount: alarmType === 'offset' ? alarmCount : undefined,
       intervalMinutes: alarmType !== 'single' ? intervalMinutes : undefined,
       repeatDays: [],
-      isOneOff: false,
+      isOneOff: true,
       dismissedForToday: false,
       generatedSequence,
     };

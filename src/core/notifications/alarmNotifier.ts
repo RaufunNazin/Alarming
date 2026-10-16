@@ -123,15 +123,15 @@ export async function initializeAlarmNotifications(): Promise<void> {
     // Set up interactive lock-screen action buttons
     await Notifications.setNotificationCategoryAsync(INTERVAL_CATEGORY_ID, [
       {
-        identifier: ACTION_DISMISS_ALL,
-        buttonTitle: "I'm Awake (Dismiss All)",
+        identifier: ACTION_DISMISS_SINGLE,
+        buttonTitle: 'Dismiss',
         options: {
           opensAppToForeground: false,
         },
       },
       {
         identifier: ACTION_SNOOZE_NEXT,
-        buttonTitle: 'Snooze to Next',
+        buttonTitle: 'Snooze',
         options: {
           opensAppToForeground: false,
         },
@@ -148,7 +148,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
       },
       {
         identifier: ACTION_SNOOZE_SINGLE,
-        buttonTitle: 'Snooze (10m)',
+        buttonTitle: 'Snooze',
         options: {
           opensAppToForeground: false,
         },
@@ -212,32 +212,25 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
       alarm.startMinute,
       alarm.offsetDirection || 'before',
       alarm.alarmCount || 10,
-      alarm.intervalMinutes || 5
+      alarm.intervalMinutes || 10
     );
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
-      const stepDate = new Date(nextOccurrenceDate);
-      stepDate.setHours(step.hour, step.minute, 0, 0);
-
-      // Handle midnight crossover for offset sequences
-      if (alarm.offsetDirection === 'before') {
-        if (step.hour > alarm.startHour) {
-          stepDate.setDate(stepDate.getDate() - 1);
-        }
-      } else {
-        if (step.hour < alarm.startHour) {
-          stepDate.setDate(stepDate.getDate() + 1);
-        }
-      }
+      // Mathematically exact step date based on sequence elapsed minutes
+      const stepDate = new Date(nextOccurrenceDate.getTime() + step.totalMinutesFromStart * 60 * 1000);
 
       // Only schedule future steps
       if (stepDate.getTime() > Date.now()) {
         try {
+          const stepTitle = alarm.label
+            ? `${alarm.label} • ${i + 1} of ${steps.length}`
+            : `Alarm • ${i + 1} of ${steps.length}`;
+
           const id = await Notifications.scheduleNotificationAsync({
             content: {
-              title: `${alarm.label || 'Interval Wakeup'} • ${i + 1} of ${steps.length}`,
-              body: `${step.timeString} — Tap to wake or dismiss all remaining`,
+              title: stepTitle,
+              body: `${step.timeString} — Tap to wake or stop`,
               sound: ALARM_NOTIFICATION_SOUND,
               categoryIdentifier: INTERVAL_CATEGORY_ID,
               data: {
@@ -272,21 +265,20 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
-      const stepDate = new Date(nextOccurrenceDate);
-      stepDate.setHours(step.hour, step.minute, 0, 0);
-
-      // If midnight crossover occurs in the sequence, increment day
-      if (step.totalMinutesFromStart > 0 && step.hour < alarm.startHour) {
-        stepDate.setDate(stepDate.getDate() + 1);
-      }
+      // Mathematically exact step date based on sequence elapsed minutes
+      const stepDate = new Date(nextOccurrenceDate.getTime() + step.totalMinutesFromStart * 60 * 1000);
 
       // Only schedule if in future
       if (stepDate.getTime() > Date.now()) {
         try {
+          const stepTitle = alarm.label
+            ? `${alarm.label} • ${i + 1} of ${steps.length}`
+            : `Alarm • ${i + 1} of ${steps.length}`;
+
           const id = await Notifications.scheduleNotificationAsync({
             content: {
-              title: `${alarm.label || 'Morning Wakeup'} • ${i + 1} of ${steps.length}`,
-              body: `${step.timeString} — Tap to wake or dismiss all remaining`,
+              title: stepTitle,
+              body: `${step.timeString} — Tap to wake or stop`,
               sound: ALARM_NOTIFICATION_SOUND,
               categoryIdentifier: INTERVAL_CATEGORY_ID,
               data: {
@@ -352,14 +344,40 @@ export async function scheduleSnoozeNotification(
 }
 
 /**
- * Cancels all remaining scheduled notifications for an alarm (One-tap "Dismiss All")
+ * Dismisses any currently visible/delivered notifications in the tray for a specific alarm.
+ */
+export async function dismissPresentedNotificationsForAlarm(alarmId: string): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const notif of presented) {
+      const data = notif.request?.content?.data;
+      if (data?.alarmId === alarmId) {
+        await Notifications.dismissNotificationAsync(notif.request.identifier);
+      }
+    }
+  } catch (e) {
+    console.warn('Error dismissing presented notifications:', e);
+  }
+}
+
+/**
+ * Cancels all remaining scheduled notifications and dismisses any presented notifications for an alarm.
  */
 export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem): Promise<void> {
+  if (Platform.OS === 'web') return;
+
   if (alarm.notificationIds && alarm.notificationIds.length > 0) {
     for (const notifId of alarm.notificationIds) {
       try {
         await Notifications.cancelScheduledNotificationAsync(notifId);
       } catch {}
+      try {
+        await Notifications.dismissNotificationAsync(notifId);
+      } catch {}
     }
   }
+
+  await dismissPresentedNotificationsForAlarm(alarm.id);
 }

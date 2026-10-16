@@ -5,12 +5,15 @@ import {
   scheduleAlarmsForAlarmItem,
   scheduleSnoozeNotification,
   cancelAllScheduledNotificationsForAlarm,
+  dismissPresentedNotificationsForAlarm,
   checkNotificationPermissions,
 } from '../../../core/notifications/alarmNotifier';
+import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
 import {
   getAlarmToastMessage,
   formatTime12h,
-  calculateNextOccurrence,
+  generateIntervalSequence,
+  generateOffsetSequence,
 } from '../engine/intervalEngine';
 
 interface AlarmState {
@@ -110,19 +113,40 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
     const index = currentAlarms.findIndex((a) => a.id === id);
     if (index === -1) return;
 
+    const existing = currentAlarms[index];
+
+    // Determine if schedule timing or repeat schedule changed
+    const scheduleChanged =
+      (updates.startHour !== undefined && updates.startHour !== existing.startHour) ||
+      (updates.startMinute !== undefined && updates.startMinute !== existing.startMinute) ||
+      (updates.endHour !== undefined && updates.endHour !== existing.endHour) ||
+      (updates.endMinute !== undefined && updates.endMinute !== existing.endMinute) ||
+      (updates.intervalMinutes !== undefined && updates.intervalMinutes !== existing.intervalMinutes) ||
+      (updates.offsetDirection !== undefined && updates.offsetDirection !== existing.offsetDirection) ||
+      (updates.alarmCount !== undefined && updates.alarmCount !== existing.alarmCount) ||
+      (updates.repeatDays !== undefined && JSON.stringify(updates.repeatDays) !== JSON.stringify(existing.repeatDays || [])) ||
+      (updates.type !== undefined && updates.type !== existing.type);
+
+    const newlyEnabled = updates.isEnabled === true && !existing.isEnabled;
+
     let updatedAlarm: AlarmItem = {
-      ...currentAlarms[index],
+      ...existing,
       ...updates,
-      // If time or repeat changes, reset dismissed status
-      dismissedForToday: false,
-      snoozedUntil: undefined,
+      // If time or repeat schedule changed, reset dismissed status
+      dismissedForToday: scheduleChanged ? false : (updates.dismissedForToday ?? existing.dismissedForToday),
+      // Preserve snooze unless explicitly changed in updates or schedule changed
+      snoozedUntil: 'snoozedUntil' in updates ? updates.snoozedUntil : (scheduleChanged ? undefined : existing.snoozedUntil),
     };
 
     let toastMsg: string | null = null;
     if (updatedAlarm.isEnabled) {
-      const notifIds = await scheduleAlarmsForAlarmItem(updatedAlarm);
-      updatedAlarm.notificationIds = notifIds;
-      toastMsg = getAlarmToastMessage(updatedAlarm);
+      if (scheduleChanged || newlyEnabled || updates.notificationIds === undefined) {
+        const notifIds = await scheduleAlarmsForAlarmItem(updatedAlarm);
+        updatedAlarm.notificationIds = notifIds;
+      }
+      if (scheduleChanged || newlyEnabled) {
+        toastMsg = getAlarmToastMessage(updatedAlarm);
+      }
     } else {
       await cancelAllScheduledNotificationsForAlarm(updatedAlarm);
       updatedAlarm.notificationIds = [];
@@ -143,6 +167,11 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
     const target = currentAlarms.find((a) => a.id === id);
     if (target) {
       await cancelAllScheduledNotificationsForAlarm(target);
+      await dismissPresentedNotificationsForAlarm(id);
+    }
+    if (get().activeRinging?.alarm.id === id) {
+      alarmSoundPlayer.stopAlarmSound();
+      set({ activeRinging: null });
     }
     const updatedAlarms = currentAlarms.filter((a) => a.id !== id);
     set({ alarms: updatedAlarms });
@@ -175,8 +204,14 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
         toastMsg = 'Note: Notifications disabled. Enable in settings to hear alarms.';
       }
     } else {
-      await cancelAllScheduledNotificationsForAlarm(updatedAlarm);
+      await cancelAllScheduledNotificationsForAlarm(alarm);
+      await dismissPresentedNotificationsForAlarm(id);
       updatedAlarm.notificationIds = [];
+      updatedAlarm.snoozedUntil = undefined;
+      if (get().activeRinging?.alarm.id === id) {
+        alarmSoundPlayer.stopAlarmSound();
+        set({ activeRinging: null });
+      }
     }
 
     const updatedAlarms = [...currentAlarms];
@@ -224,6 +259,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
   },
 
   dismissSingleAlarm: async (alarmId) => {
+    const active = get().activeRinging;
     const currentAlarms = get().alarms;
     const index = currentAlarms.findIndex((a) => a.id === alarmId);
     if (index === -1) {
@@ -232,13 +268,34 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
     }
 
     const alarm = currentAlarms[index];
-    await cancelAllScheduledNotificationsForAlarm(alarm);
+    const isSequence = alarm.type === 'interval' || alarm.type === 'offset';
+    const isIntermediateStep =
+      isSequence &&
+      active &&
+      active.alarm.id === alarmId &&
+      typeof active.currentStepIndex === 'number' &&
+      typeof active.totalSteps === 'number' &&
+      active.currentStepIndex < active.totalSteps - 1;
 
     let updatedAlarm: AlarmItem = {
       ...alarm,
-      notificationIds: [],
       snoozedUntil: undefined,
     };
+
+    if (isIntermediateStep) {
+      // Dismiss only the current step! Future scheduled alarms remain intact and alarm stays enabled.
+      await dismissPresentedNotificationsForAlarm(alarmId);
+      const updatedAlarms = [...currentAlarms];
+      updatedAlarms[index] = updatedAlarm;
+      set({ alarms: updatedAlarms, activeRinging: null });
+      await AlarmStorage.saveAlarms(updatedAlarms);
+      return;
+    }
+
+    // Final step of sequence, or single alarm
+    await cancelAllScheduledNotificationsForAlarm(alarm);
+    await dismissPresentedNotificationsForAlarm(alarmId);
+    updatedAlarm.notificationIds = [];
 
     if (alarm.isOneOff || !alarm.repeatDays || alarm.repeatDays.length === 0) {
       updatedAlarm.isEnabled = false;
@@ -257,6 +314,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
   snoozeAlarm: async (alarmId, minutes = 10) => {
     // Dismiss current overlay immediately
     set({ activeRinging: null });
+    await dismissPresentedNotificationsForAlarm(alarmId);
 
     const currentAlarms = get().alarms;
     const index = currentAlarms.findIndex((a) => a.id === alarmId);
@@ -303,14 +361,22 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
 
     const now = new Date();
     const nowMs = now.getTime();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentDayOfWeek = now.getDay();
     const currentAlarms = get().alarms;
+
+    // Prune deduplication set periodically to prevent memory accumulation
+    if (triggeredMinutesSet.size > 120) {
+      triggeredMinutesSet.clear();
+    }
 
     for (const alarm of currentAlarms) {
       if (!alarm.isEnabled) continue;
 
       // Check active snooze
       if (alarm.snoozedUntil && nowMs >= alarm.snoozedUntil) {
-        const timeStr = formatTime12h(now.getHours(), now.getMinutes());
+        const timeStr = formatTime12h(currentHour, currentMinute);
         get().setActiveRinging({
           alarm,
           currentTimeString: timeStr,
@@ -318,29 +384,87 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
           totalSteps: 1,
         });
 
-        // Clear snooze
-        get().updateAlarm(alarm.id, { snoozedUntil: undefined });
+        // Clear snooze directly on the alarm item (avoids reschedule and unwanted toast)
+        const updated = currentAlarms.map((a) =>
+          a.id === alarm.id ? { ...a, snoozedUntil: undefined } : a
+        );
+        set({ alarms: updated });
+        AlarmStorage.saveAlarms(updated);
         return;
       }
 
       // Check scheduled occurrence
       if (!alarm.dismissedForToday) {
-        const nextOccurrence = calculateNextOccurrence(alarm, now);
-        const diffMs = nextOccurrence.getTime() - nowMs;
+        const isDayActive =
+          !alarm.repeatDays ||
+          alarm.repeatDays.length === 0 ||
+          alarm.repeatDays.includes(currentDayOfWeek);
 
-        // If next occurrence is due now (within 30-second window)
-        if (Math.abs(diffMs) <= 30000) {
-          const minuteKey = `${alarm.id}_${now.toISOString().slice(0, 16)}`;
-          if (!triggeredMinutesSet.has(minuteKey)) {
-            triggeredMinutesSet.add(minuteKey);
-            const timeStr = formatTime12h(alarm.startHour, alarm.startMinute);
-            get().setActiveRinging({
-              alarm,
-              currentTimeString: timeStr,
-              currentStepIndex: 0,
-              totalSteps: 1,
-            });
-            return;
+        if (isDayActive) {
+          if (alarm.type === 'interval') {
+            const steps = generateIntervalSequence(
+              alarm.startHour,
+              alarm.startMinute,
+              alarm.endHour ?? alarm.startHour,
+              alarm.endMinute ?? alarm.startMinute,
+              alarm.intervalMinutes ?? 10
+            );
+            for (let i = 0; i < steps.length; i++) {
+              const step = steps[i];
+              if (step.hour === currentHour && step.minute === currentMinute) {
+                const minuteKey = `${alarm.id}_step_${i}_${now.toISOString().slice(0, 16)}`;
+                if (!triggeredMinutesSet.has(minuteKey)) {
+                  triggeredMinutesSet.add(minuteKey);
+                  get().setActiveRinging({
+                    alarm,
+                    currentTimeString: step.timeString,
+                    currentStepIndex: i,
+                    totalSteps: steps.length,
+                  });
+                  return;
+                }
+              }
+            }
+          } else if (alarm.type === 'offset') {
+            const steps = generateOffsetSequence(
+              alarm.startHour,
+              alarm.startMinute,
+              alarm.offsetDirection || 'before',
+              alarm.alarmCount || 10,
+              alarm.intervalMinutes || 10
+            );
+            for (let i = 0; i < steps.length; i++) {
+              const step = steps[i];
+              if (step.hour === currentHour && step.minute === currentMinute) {
+                const minuteKey = `${alarm.id}_offset_${i}_${now.toISOString().slice(0, 16)}`;
+                if (!triggeredMinutesSet.has(minuteKey)) {
+                  triggeredMinutesSet.add(minuteKey);
+                  get().setActiveRinging({
+                    alarm,
+                    currentTimeString: step.timeString,
+                    currentStepIndex: i,
+                    totalSteps: steps.length,
+                  });
+                  return;
+                }
+              }
+            }
+          } else {
+            // Single Alarm
+            if (alarm.startHour === currentHour && alarm.startMinute === currentMinute) {
+              const minuteKey = `${alarm.id}_single_${now.toISOString().slice(0, 16)}`;
+              if (!triggeredMinutesSet.has(minuteKey)) {
+                triggeredMinutesSet.add(minuteKey);
+                const timeStr = formatTime12h(alarm.startHour, alarm.startMinute);
+                get().setActiveRinging({
+                  alarm,
+                  currentTimeString: timeStr,
+                  currentStepIndex: 0,
+                  totalSteps: 1,
+                });
+                return;
+              }
+            }
           }
         }
       }

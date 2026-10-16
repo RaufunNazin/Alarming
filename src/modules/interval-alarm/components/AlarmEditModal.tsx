@@ -9,7 +9,8 @@ import {
   TextInput,
   Pressable,
 } from 'react-native';
-import { Sparkles, Minus, Plus, Trash2, Edit3 } from 'lucide-react-native';
+import { Minus, Plus, Trash2, Edit3 } from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../../core/theme';
 import { AlarmItem, AlarmType } from '../types';
 import { ClockEditModal } from './ClockEditModal';
@@ -19,7 +20,6 @@ import {
   generateOffsetSequence,
   formatRepeatDays,
 } from '../engine/intervalEngine';
-import { calculateSnappedEndTime } from '../engine/snapHelper';
 
 interface AlarmEditModalProps {
   visible: boolean;
@@ -65,7 +65,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       setEndMinute(alarm.endMinute ?? alarm.startMinute);
       setOffsetDirection(alarm.offsetDirection || 'before');
       setAlarmCount(alarm.alarmCount || 10);
-      setIntervalMinutes(alarm.intervalMinutes || (alarm.type === 'offset' ? 5 : 10));
+      setIntervalMinutes(alarm.intervalMinutes || 10);
       setLabel(alarm.label || '');
       setRepeatDays(alarm.repeatDays || []);
       setClockModalVisible(false);
@@ -81,24 +81,6 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
     } else {
       setRepeatDays([...repeatDays, dayIndex].sort());
     }
-  };
-
-  // Interval snap calculation (for Window Interval)
-  const snapped = calculateSnappedEndTime(
-    startHour,
-    startMinute,
-    endHour,
-    endMinute,
-    intervalMinutes
-  );
-
-  const isUneven =
-    alarmType === 'interval' &&
-    (snapped.snappedHour !== endHour || snapped.snappedMinute !== endMinute);
-
-  const handleApplySnap = () => {
-    setEndHour(snapped.snappedHour);
-    setEndMinute(snapped.snappedMinute);
   };
 
   const handleClockConfirm = (result: {
@@ -139,17 +121,23 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       ).map((s) => s.timeString);
     }
 
-    const defaultLabelText =
-      alarmType === 'interval'
-        ? 'Morning Wakeup'
-        : alarmType === 'offset'
-        ? 'Interval Wakeup'
-        : 'Alarm';
+    const timeOrConfigChanged =
+      startHour !== alarm.startHour ||
+      startMinute !== alarm.startMinute ||
+      endHour !== (alarm.endHour ?? (alarm.startHour + 1) % 24) ||
+      endMinute !== (alarm.endMinute ?? alarm.startMinute) ||
+      intervalMinutes !== (alarm.intervalMinutes ?? 10) ||
+      offsetDirection !== (alarm.offsetDirection ?? 'before') ||
+      alarmCount !== (alarm.alarmCount ?? 10) ||
+      alarmType !== alarm.type ||
+      JSON.stringify(repeatDays) !== JSON.stringify(alarm.repeatDays || []);
+
+    const finalIsEnabled = !alarm.isEnabled && timeOrConfigChanged ? true : alarm.isEnabled;
 
     const updatedAlarm: Omit<AlarmItem, 'id'> = {
       type: alarmType,
-      label: label.trim() || defaultLabelText,
-      isEnabled: alarm.isEnabled,
+      label: label.trim(),
+      isEnabled: finalIsEnabled,
       startHour,
       startMinute,
       endHour: alarmType === 'interval' ? endHour : undefined,
@@ -158,7 +146,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       alarmCount: alarmType === 'offset' ? alarmCount : undefined,
       intervalMinutes: alarmType !== 'single' ? intervalMinutes : undefined,
       repeatDays,
-      isOneOff: alarm.isOneOff,
+      isOneOff: !repeatDays || repeatDays.length === 0,
       dismissedForToday: alarm.dismissedForToday,
       generatedSequence,
     };
@@ -451,44 +439,6 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 </View>
               )}
 
-              {/* Snap Helper (For Window Interval when uneven) */}
-              {isUneven && (
-                <View style={styles.sectionContainer}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={handleApplySnap}
-                    style={[
-                      styles.snapContainer,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.primary,
-                        borderRadius: radii.buttonMedium,
-                      },
-                    ]}
-                  >
-                    <Sparkles size={18} color={colors.accent} strokeWidth={2.2} />
-                    <View style={styles.snapTextCol}>
-                      <Text
-                        style={[
-                          styles.snapTitle,
-                          { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                        ]}
-                      >
-                        Snap End Time to {formatTime12h(snapped.snappedHour, snapped.snappedMinute)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.snapSubtitle,
-                          { color: colors.textMuted, fontFamily: typography.numbersRegular },
-                        ]}
-                      >
-                        Gives clean {snapped.alarmCount} alarms evenly every {intervalMinutes}m
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              )}
-
               {/* Delete Alarm Button */}
               {onDelete && (
                 <TouchableOpacity
@@ -586,7 +536,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
         onConfirm={handleClockConfirm}
       />
 
-      {/* Custom Styled Delete Confirmation Modal */}
+      {/* Custom Styled Delete Confirmation Modal with Frosted Blur Backdrop */}
       <Modal
         visible={showDeleteConfirm}
         transparent
@@ -594,6 +544,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
         onRequestClose={() => setShowDeleteConfirm(false)}
       >
         <View style={styles.confirmBackdrop}>
+          <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowDeleteConfirm(false)}
+          />
           <View
             style={[
               styles.confirmCard,
@@ -798,23 +753,6 @@ const styles = StyleSheet.create({
   stepperValueText: {
     fontSize: 15,
   },
-  snapContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    padding: 14,
-  },
-  snapTextCol: {
-    flex: 1,
-  },
-  snapTitle: {
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  snapSubtitle: {
-    fontSize: 11,
-  },
   deleteAlarmBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -859,7 +797,7 @@ const styles = StyleSheet.create({
   },
   confirmBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 28,

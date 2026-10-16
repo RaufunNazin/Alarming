@@ -89,10 +89,10 @@ export function generateOffsetSequence(
   targetMinute: number,
   direction: 'before' | 'after' = 'before',
   count: number = 10,
-  intervalMinutes: number = 5
+  intervalMinutes: number = 10
 ): IntervalStep[] {
   const safeCount = Math.max(1, Math.min(30, count || 10));
-  const safeInterval = Math.max(1, Math.min(60, intervalMinutes || 5));
+  const safeInterval = Math.max(1, Math.min(60, intervalMinutes || 10));
   const targetTotal = targetHour * 60 + targetMinute;
 
   const steps: IntervalStep[] = [];
@@ -155,7 +155,7 @@ export function formatAlarmTimeDisplay(alarm: AlarmItem): string {
       alarm.startMinute,
       alarm.offsetDirection || 'before',
       alarm.alarmCount || 10,
-      alarm.intervalMinutes || 5
+      alarm.intervalMinutes || 10
     );
     if (seq.length > 0) {
       const first = seq[0].timeString;
@@ -188,7 +188,7 @@ export function getSmartScheduleString(alarm: AlarmItem, referenceDate: Date = n
         alarm.startMinute,
         'before',
         alarm.alarmCount || 10,
-        alarm.intervalMinutes || 5
+        alarm.intervalMinutes || 10
       );
       if (seq.length > 0) {
         triggerHour = seq[0].hour;
@@ -267,7 +267,7 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
       alarm.startMinute,
       'before',
       alarm.alarmCount || 10,
-      alarm.intervalMinutes || 5
+      alarm.intervalMinutes || 10
     );
     if (seq.length > 0) {
       effectiveHour = seq[0].hour;
