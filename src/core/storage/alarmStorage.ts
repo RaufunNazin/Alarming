@@ -22,28 +22,14 @@ export const AlarmStorage = {
         }
       }
       if (data) {
-        return JSON.parse(data);
+        const parsed: AlarmItem[] = JSON.parse(data);
+        // Clean up legacy seeded default alarm if previously stored
+        return parsed.filter((a) => a.id !== 'default_morning_wakeup');
       }
     } catch (e) {
       console.warn('Error reading alarms from storage:', e);
     }
-    // Default initial alarm
-    return [
-      {
-        id: 'default_morning_wakeup',
-        type: 'interval',
-        label: 'Morning Wakeup',
-        isEnabled: true,
-        startHour: 6,
-        startMinute: 30,
-        endHour: 7,
-        endMinute: 30,
-        intervalMinutes: 10,
-        repeatDays: [1, 2, 3, 4, 5], // Mon-Fri
-        isOneOff: false,
-        dismissedForToday: false,
-      },
-    ];
+    return [];
   },
 
   async saveAlarms(alarms: AlarmItem[]): Promise<void> {

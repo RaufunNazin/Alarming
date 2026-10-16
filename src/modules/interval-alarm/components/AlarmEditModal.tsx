@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   Pressable,
 } from 'react-native';
 import { Sparkles, Minus, Plus, Trash2, Edit3 } from 'lucide-react-native';
@@ -55,6 +54,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
   // Submodal state for clock editing
   const [clockModalVisible, setClockModalVisible] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (visible && alarm) {
@@ -69,6 +69,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       setLabel(alarm.label || '');
       setRepeatDays(alarm.repeatDays || []);
       setClockModalVisible(false);
+      setShowDeleteConfirm(false);
     }
   }, [visible, alarm]);
 
@@ -168,17 +169,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
   const handleDelete = () => {
     if (!onDelete) return;
-    Alert.alert('Delete Alarm', 'Are you sure you want to delete this alarm?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          onDelete(alarm.id);
-          onClose();
-        },
-      },
-    ]);
+    setShowDeleteConfirm(true);
   };
 
   const timeDisplayString =
@@ -594,6 +585,109 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
         onClose={() => setClockModalVisible(false)}
         onConfirm={handleClockConfirm}
       />
+
+      {/* Custom Styled Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
+      >
+        <View style={styles.confirmBackdrop}>
+          <View
+            style={[
+              styles.confirmCard,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.surfaceBorder,
+                borderRadius: radii.cardOuter,
+              },
+              shadows.card,
+            ]}
+          >
+            <View
+              style={[
+                styles.confirmIconContainer,
+                {
+                  backgroundColor: colors.danger + '18',
+                  borderRadius: radii.cardInner,
+                },
+              ]}
+            >
+              <Trash2 size={24} color={colors.danger} strokeWidth={2.2} />
+            </View>
+
+            <Text
+              style={[
+                styles.confirmTitle,
+                { color: colors.textPrimary, fontFamily: typography.numbersBold },
+              ]}
+            >
+              Delete Alarm?
+            </Text>
+
+            <Text
+              style={[
+                styles.confirmMessage,
+                { color: colors.textSecondary, fontFamily: typography.numbersRegular },
+              ]}
+            >
+              Are you sure you want to delete this alarm? This action cannot be undone.
+            </Text>
+
+            <View style={styles.confirmActionsRow}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setShowDeleteConfirm(false)}
+                style={[
+                  styles.confirmCancelBtn,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.surfaceBorder,
+                    borderRadius: radii.button,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.confirmCancelText,
+                    { color: colors.textSecondary, fontFamily: typography.numbers },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowDeleteConfirm(false);
+                  if (onDelete) {
+                    onDelete(alarm.id);
+                  }
+                  onClose();
+                }}
+                style={[
+                  styles.confirmDeleteBtn,
+                  {
+                    backgroundColor: colors.danger,
+                    borderRadius: radii.button,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.confirmDeleteText,
+                    { color: '#FFFFFF', fontFamily: typography.numbersBold },
+                  ]}
+                >
+                  Delete
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 };
@@ -761,6 +855,64 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bottomSaveBtnText: {
+    fontSize: 15,
+  },
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 20,
+    alignItems: 'center',
+  },
+  confirmIconContainer: {
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  confirmMessage: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  confirmActionsRow: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  confirmCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmCancelText: {
+    fontSize: 15,
+  },
+  confirmDeleteBtn: {
+    flex: 1,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmDeleteText: {
     fontSize: 15,
   },
 });
