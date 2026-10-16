@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Caveat_400Regular,
@@ -49,53 +49,58 @@ export default function App() {
     initialize();
 
     // Listen to notification responses (including lock screen actions)
-    const subscription = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        const actionIdentifier = response.actionIdentifier;
-        const data = response.notification.request.content.data;
-        const alarmId = data?.alarmId as string;
+    let subscription: Notifications.EventSubscription | null = null;
+    let foregroundSubscription: Notifications.EventSubscription | null = null;
 
-        if (actionIdentifier === ACTION_DISMISS_ALL && alarmId) {
-          dismissAllRemainingForToday(alarmId);
-        } else if (actionIdentifier === ACTION_DISMISS_SINGLE && alarmId) {
-          dismissSingleAlarm(alarmId);
-        } else if (alarmId) {
-          // User tapped notification directly: open ringing overlay
-          const target = alarms.find((a) => a.id === alarmId);
-          if (target) {
-            setActiveRinging({
-              alarm: target,
-              currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
-              totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
-              currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
-            });
+    if (Platform.OS !== 'web') {
+      subscription = Notifications.addNotificationResponseReceivedListener(
+        (response) => {
+          const actionIdentifier = response.actionIdentifier;
+          const data = response.notification.request.content.data;
+          const alarmId = data?.alarmId as string;
+
+          if (actionIdentifier === ACTION_DISMISS_ALL && alarmId) {
+            dismissAllRemainingForToday(alarmId);
+          } else if (actionIdentifier === ACTION_DISMISS_SINGLE && alarmId) {
+            dismissSingleAlarm(alarmId);
+          } else if (alarmId) {
+            // User tapped notification directly: open ringing overlay
+            const target = alarms.find((a) => a.id === alarmId);
+            if (target) {
+              setActiveRinging({
+                alarm: target,
+                currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
+                totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
+                currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
+              });
+            }
           }
         }
-      }
-    );
+      );
 
-    // Listen to incoming foreground notifications
-    const foregroundSubscription = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        const data = notification.request.content.data;
-        const alarmId = data?.alarmId as string;
-        if (alarmId) {
-          const target = alarms.find((a) => a.id === alarmId);
-          if (target) {
-            setActiveRinging({
-              alarm: target,
-              currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
-              totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
-              currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
-            });
+      // Listen to incoming foreground notifications
+      foregroundSubscription = Notifications.addNotificationReceivedListener(
+        (notification) => {
+          const data = notification.request.content.data;
+          const alarmId = data?.alarmId as string;
+          if (alarmId) {
+            const target = alarms.find((a) => a.id === alarmId);
+            if (target) {
+              setActiveRinging({
+                alarm: target,
+                currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
+                totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
+                currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
+              });
+            }
           }
         }
-      }
-    );
+      );
+    }
 
     return () => {
-      subscription.remove();
-      foregroundSubscription.remove();
+      subscription?.remove();
+      foregroundSubscription?.remove();
     };
   }, [alarms]);
 
@@ -112,16 +117,31 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ActiveScreen />
+        <View style={styles.webOuter}>
+          <View style={styles.webContainer}>
+            <ActiveScreen />
+          </View>
+        </View>
       </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  webOuter: {
+    flex: 1,
+    backgroundColor: '#0A090B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webContainer: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 480,
+  },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#130E14',
+    backgroundColor: '#111012',
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -30,6 +30,9 @@ Notifications.setNotificationHandler({
  * Initialize high-importance Android alarm channels & interactive lockscreen actions
  */
 export async function initializeAlarmNotifications(): Promise<void> {
+  if (Platform.OS === 'web') {
+    return;
+  }
   try {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -107,7 +110,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
  * Returns the list of scheduled notification IDs.
  */
 export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<string[]> {
-  if (!alarm.isEnabled) {
+  if (!alarm.isEnabled || Platform.OS === 'web') {
     return [];
   }
 
