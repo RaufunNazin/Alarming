@@ -1,5 +1,7 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import * as Haptics from 'expo-haptics';
+
+const { AlarmSound } = NativeModules;
 
 /**
  * Universal Alarm Sound Engine & Synthesizer
@@ -98,20 +100,36 @@ class AlarmSoundEngine {
     // Trigger immediate haptics on native
     this.triggerHapticPulse();
 
+    // 1. Play native Android clock alarm sound (TYPE_ALARM)
+    if (Platform.OS === 'android' && !this.isMuted) {
+      try {
+        AlarmSound?.playAlarmSound?.();
+      } catch (e) {
+        console.warn('Could not trigger native alarm sound:', e);
+      }
+    }
+
+    // 2. Play Web audio chime chord on web
     const ctx = this.getAudioContext();
-    if (ctx) {
+    if (ctx && !this.isMuted) {
       if (ctx.state === 'suspended') {
         ctx.resume().catch(() => {});
       }
-      // Play first chord immediately
       this.playWebChimeChord(ctx);
     }
 
-    // Set up repeating chime loop every 2.0 seconds
+    // Set up repeating chime/pulse loop
     this.loopInterval = setInterval(() => {
       this.triggerHapticPulse();
+
+      if (Platform.OS === 'android' && !this.isMuted) {
+        try {
+          AlarmSound?.playAlarmSound?.();
+        } catch {}
+      }
+
       const currentCtx = this.getAudioContext();
-      if (currentCtx) {
+      if (currentCtx && !this.isMuted) {
         if (currentCtx.state === 'suspended') {
           currentCtx.resume().catch(() => {});
         }
@@ -125,6 +143,13 @@ class AlarmSoundEngine {
    */
   public stopAlarmSound(): void {
     this.isPlaying = false;
+    if (Platform.OS === 'android') {
+      try {
+        AlarmSound?.stopAlarmSound?.();
+      } catch (e) {
+        console.warn('Could not stop native alarm sound:', e);
+      }
+    }
     if (this.loopInterval) {
       clearInterval(this.loopInterval);
       this.loopInterval = null;

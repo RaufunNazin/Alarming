@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Modal,
   View,
@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Sun, Clock, Bell, Volume2, VolumeX } from 'lucide-react-native';
+import { Sun, Clock, Bell } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { useAlarmStore } from '../store/alarmStore';
 import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
 
 export const AlarmRingingOverlay: React.FC = () => {
-  const { colors, typography, radii, shadows, spacing } = useTheme();
+  const { colors, typography, radii, shadows } = useTheme();
   const {
     activeRinging,
     dismissAllRemainingForToday,
@@ -22,7 +22,6 @@ export const AlarmRingingOverlay: React.FC = () => {
   } = useAlarmStore();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const [isMuted, setIsMuted] = useState(alarmSoundPlayer.getIsMuted());
 
   useEffect(() => {
     if (activeRinging) {
@@ -69,11 +68,6 @@ export const AlarmRingingOverlay: React.FC = () => {
     snoozeAlarm(activeRinging.alarm.id, 10);
   };
 
-  const handleToggleMute = () => {
-    const muted = alarmSoundPlayer.toggleMute();
-    setIsMuted(muted);
-  };
-
   const currentStep = activeRinging.currentStepIndex ?? 0;
   const totalSteps = activeRinging.totalSteps ?? 1;
 
@@ -82,8 +76,8 @@ export const AlarmRingingOverlay: React.FC = () => {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Top Header */}
         <View style={styles.topHeader}>
-          <View style={styles.headerLeft}>
-            <Bell size={24} color={colors.accent} strokeWidth={2.2} />
+          <View style={styles.headerTitleRow}>
+            <Bell size={22} color={colors.accent} strokeWidth={2.4} />
             <Text
               style={[
                 styles.headerTitle,
@@ -93,25 +87,6 @@ export const AlarmRingingOverlay: React.FC = () => {
               Alarm
             </Text>
           </View>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={handleToggleMute}
-            style={[
-              styles.muteBtn,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.surfaceBorder,
-                borderRadius: radii.chip,
-              },
-            ]}
-            accessibilityLabel={isMuted ? 'Unmute alarm sound' : 'Mute alarm sound'}
-          >
-            {isMuted ? (
-              <VolumeX size={18} color={colors.textSecondary} />
-            ) : (
-              <Volume2 size={18} color={colors.accent} />
-            )}
-          </TouchableOpacity>
         </View>
 
         {/* Center Clock & Ringing Visual */}
@@ -171,68 +146,60 @@ export const AlarmRingingOverlay: React.FC = () => {
           </View>
         </View>
 
-        {/* Action Buttons with GENEROUS 28px GAP */}
-        <View style={[styles.actionsSection, { paddingHorizontal: spacing.xl }]}>
-          {/* PRIMARY ACTION: Solid high-contrast pill */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleDismiss}
-            style={[
-              styles.primaryBtn,
-              shadows.buttonPrimary,
-              {
-                backgroundColor: colors.textPrimary,
-                borderRadius: radii.cardOuter,
-              },
-            ]}
-          >
-            <Sun size={20} color={colors.textOnPrimary} strokeWidth={2.4} />
-            <Text
+        {/* Big Action Buttons - Flex Side by Side */}
+        <View style={styles.actionsSection}>
+          <View style={styles.actionsRow}>
+            {/* SNOOZE BUTTON */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleSnooze}
               style={[
-                styles.primaryBtnText,
+                styles.actionBigBtn,
                 {
-                  color: colors.textOnPrimary,
-                  fontFamily: typography.numbersBold,
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.surfaceBorder,
+                  borderRadius: radii.cardOuter,
                 },
               ]}
             >
-              {isInterval
-                ? "I'm Awake • Dismiss All"
-                : 'Dismiss'}
-            </Text>
-          </TouchableOpacity>
+              <Clock size={36} color={colors.textSecondary} strokeWidth={2.2} />
+              <Text
+                style={[
+                  styles.actionSmallText,
+                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                ]}
+              >
+                {isInterval
+                  ? `SNOOZE (${activeRinging.alarm.intervalMinutes || 10}M)`
+                  : 'SNOOZE (10M)'}
+              </Text>
+            </TouchableOpacity>
 
-          {/* Generous 28px vertical gap to completely eliminate mis-taps */}
-          <View style={styles.buttonSeparatorGap} />
-
-          {/* SECONDARY ACTION: Distinct outlined card button */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleSnooze}
-            style={[
-              styles.secondaryBtn,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.surfaceBorder,
-                borderRadius: radii.cardOuter,
-              },
-            ]}
-          >
-            <Clock size={18} color={colors.textSecondary} strokeWidth={2.2} />
-            <Text
+            {/* STOP BUTTON */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleDismiss}
               style={[
-                styles.secondaryBtnText,
+                styles.actionBigBtn,
+                shadows.buttonPrimary,
                 {
-                  color: colors.textSecondary,
-                  fontFamily: typography.numbersBold,
+                  backgroundColor: colors.primary,
+                  borderColor: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: radii.cardOuter,
                 },
               ]}
             >
-              {isInterval
-                ? `Snooze to Next (${activeRinging.alarm.intervalMinutes || 10}m)`
-                : 'Snooze 10 min'}
-            </Text>
-          </TouchableOpacity>
+              <Sun size={36} color="#FFFFFF" strokeWidth={2.4} />
+              <Text
+                style={[
+                  styles.actionSmallText,
+                  { color: '#FFFFFF', fontFamily: typography.numbersBold },
+                ]}
+              >
+                {isInterval ? 'STOP ALL' : 'STOP'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -248,49 +215,45 @@ const styles = StyleSheet.create({
   topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 28,
   },
-  headerLeft: {
+  headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  muteBtn: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 8,
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 20,
     letterSpacing: 0.5,
   },
   centerSection: {
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
   },
   pulseCircle: {
-    width: 250,
-    height: 250,
-    borderRadius: 125,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
   },
   innerPulseCircle: {
-    width: 210,
-    height: 210,
-    borderRadius: 105,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   timeDisplay: {
-    fontSize: 56,
-    lineHeight: 62,
+    fontSize: 44,
+    lineHeight: 52,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   alarmInfoBadge: {
     alignItems: 'center',
@@ -305,33 +268,28 @@ const styles = StyleSheet.create({
   },
   actionsSection: {
     width: '100%',
+    paddingHorizontal: 20,
+    marginBottom: 10,
   },
-  primaryBtn: {
+  actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
+    gap: 16,
     width: '100%',
   },
-  primaryBtnText: {
-    fontSize: 15,
-    letterSpacing: 0.5,
-  },
-  buttonSeparatorGap: {
-    height: 28, // Generous 28px gap to prevent accidental mis-taps
-  },
-  secondaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 15,
+  actionBigBtn: {
+    flex: 1,
+    height: 108,
     borderWidth: 1,
-    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
   },
-  secondaryBtnText: {
-    fontSize: 14,
-    letterSpacing: 0.4,
+  actionSmallText: {
+    fontSize: 12,
+    letterSpacing: 0.8,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

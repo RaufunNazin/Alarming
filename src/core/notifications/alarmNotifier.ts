@@ -8,7 +8,7 @@ import {
   formatTime12h,
 } from '../../modules/interval-alarm/engine/intervalEngine';
 
-export const ALARM_CHANNEL_ID = 'alarming_interval_alarm_channel_v2';
+export const ALARM_CHANNEL_ID = 'alarming_interval_alarm_channel_v3';
 export const INTERVAL_CATEGORY_ID = 'ALARMING_INTERVAL_CATEGORY';
 export const SINGLE_CATEGORY_ID = 'ALARMING_SINGLE_CATEGORY';
 
@@ -93,24 +93,31 @@ export async function initializeAlarmNotifications(): Promise<void> {
     }
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
-        name: 'Alarming Wakeup',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 200, 500, 200, 500],
-        enableLights: true,
-        lightColor: '#AD343E',
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        bypassDnd: true,
-        sound: 'default',
-        audioAttributes: {
-          usage: Notifications.AndroidAudioUsage.ALARM,
-          contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-          flags: {
-            enforceAudibility: true,
-            requestHardwareAudioVideoSynchronization: false,
+      // Clean up legacy channel if present
+      try {
+        await Notifications.deleteNotificationChannelAsync('alarming_interval_alarm_channel_v2');
+      } catch {}
+
+      const existing = await Notifications.getNotificationChannelAsync(ALARM_CHANNEL_ID);
+      if (!existing) {
+        await Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
+          name: 'Alarming Wakeup',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 500, 200, 500, 200, 500],
+          enableLights: true,
+          lightColor: '#AD343E',
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          bypassDnd: true,
+          audioAttributes: {
+            usage: Notifications.AndroidAudioUsage.ALARM,
+            contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+            flags: {
+              enforceAudibility: true,
+              requestHardwareAudioVideoSynchronization: false,
+            },
           },
-        },
-      });
+        });
+      }
     }
 
     // Set up interactive lock-screen action buttons

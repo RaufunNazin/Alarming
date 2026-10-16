@@ -145,7 +145,10 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                   <TouchableOpacity
                     key={tab.key}
                     activeOpacity={0.8}
-                    onPress={() => setAlarmType(tab.key)}
+                    onPress={() => {
+                      setAlarmType(tab.key);
+                      setActiveTimeTab('start');
+                    }}
                     style={[
                       styles.typeSegment,
                       isSelected && {

@@ -54,7 +54,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   useEffect(() => {
     if (visible) {
       const next = getNextHourTime();
-      const currentType = lastSelectedType || 'single';
+      const currentType = useAlarmStore.getState().lastSelectedType || 'single';
       setAlarmType(currentType);
       setActiveTimeTab('start');
       setStartHour(next.hour);
@@ -65,10 +65,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       setAlarmCount(10);
       setIntervalMinutes(currentType === 'offset' ? 5 : 10);
     }
-  }, [visible, lastSelectedType]);
+  }, [visible]);
 
   const handleSelectType = (type: AlarmType) => {
     setAlarmType(type);
+    setActiveTimeTab('start');
     if (type === 'offset' && intervalMinutes !== 5) {
       setIntervalMinutes(5);
     } else if (type === 'interval' && intervalMinutes !== 10) {
