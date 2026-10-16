@@ -9,14 +9,14 @@ export const GreetingHeader: React.FC = () => {
     <View style={[styles.container, { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }]}>
       <Text
         style={[
-          styles.greetingText,
+          styles.titleText,
           {
             color: colors.textPrimary,
-            fontFamily: typography.cursive,
+            fontFamily: typography.numbersBold,
           },
         ]}
       >
-        Good morning, my love
+        Alarms
       </Text>
     </View>
   );
@@ -25,10 +25,12 @@ export const GreetingHeader: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  greetingText: {
-    fontSize: 36,
-    lineHeight: 44,
-    letterSpacing: 0.2,
+  titleText: {
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.3,
   },
 });

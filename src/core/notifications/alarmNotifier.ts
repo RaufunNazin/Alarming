@@ -4,40 +4,87 @@ import { AlarmItem } from '../../modules/interval-alarm/types';
 import {
   calculateNextOccurrence,
   generateIntervalSequence,
+  generateOffsetSequence,
+  formatTime12h,
 } from '../../modules/interval-alarm/engine/intervalEngine';
 
-export const ALARM_CHANNEL_ID = 'amour_morning_interval_alarm_channel_v1';
-export const INTERVAL_CATEGORY_ID = 'AMOUR_INTERVAL_CATEGORY';
-export const SINGLE_CATEGORY_ID = 'AMOUR_SINGLE_CATEGORY';
+export const ALARM_CHANNEL_ID = 'alarming_interval_alarm_channel_v2';
+export const INTERVAL_CATEGORY_ID = 'ALARMING_INTERVAL_CATEGORY';
+export const SINGLE_CATEGORY_ID = 'ALARMING_SINGLE_CATEGORY';
 
 export const ACTION_DISMISS_ALL = 'DISMISS_ALL_REMAINING';
 export const ACTION_SNOOZE_NEXT = 'SNOOZE_NEXT';
 export const ACTION_DISMISS_SINGLE = 'DISMISS_SINGLE';
 export const ACTION_SNOOZE_SINGLE = 'SNOOZE_SINGLE';
 
-// Configure in-app notification presentation handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// On iOS, 'defaultRingtone' invokes the system ringtone/alarm; on Android, channel routes to TYPE_ALARM
+const ALARM_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'defaultRingtone' : 'default';
+
+// Configure in-app notification presentation handler on native platforms
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
+
+/**
+ * Checks current notification permission status across platforms.
+ */
+export async function checkNotificationPermissions(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return {
+        granted: Notification.permission === 'granted',
+        canAskAgain: Notification.permission === 'default',
+      };
+    }
+    return { granted: true, canAskAgain: false };
+  }
+
+  try {
+    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+    return {
+      granted: status === 'granted',
+      canAskAgain,
+    };
+  } catch {
+    return { granted: false, canAskAgain: true };
+  }
+}
 
 /**
  * Initialize high-importance Android alarm channels & interactive lockscreen actions
  */
 export async function initializeAlarmNotifications(): Promise<void> {
   if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        try {
+          await Notification.requestPermission();
+        } catch {}
+      }
+    }
     return;
   }
+
   try {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+          allowCriticalAlerts: true,
+        },
+      });
       finalStatus = status;
     }
 
@@ -47,11 +94,11 @@ export async function initializeAlarmNotifications(): Promise<void> {
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
-        name: 'Morning Alarms',
+        name: 'Alarming Wakeup',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 200, 500, 200, 500],
         enableLights: true,
-        lightColor: '#C9939B',
+        lightColor: '#AD343E',
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         bypassDnd: true,
         sound: 'default',
@@ -119,7 +166,7 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
     for (const notifId of alarm.notificationIds) {
       try {
         await Notifications.cancelScheduledNotificationAsync(notifId);
-      } catch (_) {}
+      } catch {}
     }
   }
 
@@ -133,11 +180,12 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
         content: {
           title: alarm.label || 'Alarm',
           body: 'Time to rise gently',
-          sound: true,
+          sound: ALARM_NOTIFICATION_SOUND,
           categoryIdentifier: SINGLE_CATEGORY_ID,
           data: {
             alarmId: alarm.id,
             type: 'single',
+            timeString: formatTime12h(alarm.startHour, alarm.startMinute),
           },
         },
         trigger: {
@@ -150,8 +198,63 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
     } catch (e) {
       console.warn('Error scheduling single alarm:', e);
     }
+  } else if (alarm.type === 'offset') {
+    // Offset Alarm Sequence
+    const steps = generateOffsetSequence(
+      alarm.startHour,
+      alarm.startMinute,
+      alarm.offsetDirection || 'before',
+      alarm.alarmCount || 10,
+      alarm.intervalMinutes || 5
+    );
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const stepDate = new Date(nextOccurrenceDate);
+      stepDate.setHours(step.hour, step.minute, 0, 0);
+
+      // Handle midnight crossover for offset sequences
+      if (alarm.offsetDirection === 'before') {
+        if (step.hour > alarm.startHour) {
+          stepDate.setDate(stepDate.getDate() - 1);
+        }
+      } else {
+        if (step.hour < alarm.startHour) {
+          stepDate.setDate(stepDate.getDate() + 1);
+        }
+      }
+
+      // Only schedule future steps
+      if (stepDate.getTime() > Date.now()) {
+        try {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `${alarm.label || 'Interval Wakeup'} • ${i + 1} of ${steps.length}`,
+              body: `${step.timeString} — Tap to wake or dismiss all remaining`,
+              sound: ALARM_NOTIFICATION_SOUND,
+              categoryIdentifier: INTERVAL_CATEGORY_ID,
+              data: {
+                alarmId: alarm.id,
+                type: 'offset',
+                stepIndex: i,
+                totalSteps: steps.length,
+                timeString: step.timeString,
+              },
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: stepDate,
+              channelId: ALARM_CHANNEL_ID,
+            },
+          });
+          scheduledIds.push(id);
+        } catch (e) {
+          console.warn(`Error scheduling offset step ${i}:`, e);
+        }
+      }
+    }
   } else {
-    // Interval Alarm Sequence
+    // Window Interval Alarm Sequence
     const steps = generateIntervalSequence(
       alarm.startHour,
       alarm.startMinute,
@@ -177,7 +280,7 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
             content: {
               title: `${alarm.label || 'Morning Wakeup'} • ${i + 1} of ${steps.length}`,
               body: `${step.timeString} — Tap to wake or dismiss all remaining`,
-              sound: true,
+              sound: ALARM_NOTIFICATION_SOUND,
               categoryIdentifier: INTERVAL_CATEGORY_ID,
               data: {
                 alarmId: alarm.id,
@@ -205,6 +308,43 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
 }
 
 /**
+ * Schedules a follow-up notification when an alarm is snoozed.
+ */
+export async function scheduleSnoozeNotification(
+  alarm: AlarmItem,
+  minutes: number = 10
+): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+
+  try {
+    const triggerDate = new Date(Date.now() + minutes * 60 * 1000);
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `${alarm.label || 'Alarm'} (Snoozed)`,
+        body: 'Time to wake up gently',
+        sound: ALARM_NOTIFICATION_SOUND,
+        categoryIdentifier: SINGLE_CATEGORY_ID,
+        data: {
+          alarmId: alarm.id,
+          type: alarm.type,
+          isSnooze: true,
+          timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+        },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerDate,
+        channelId: ALARM_CHANNEL_ID,
+      },
+    });
+    return id;
+  } catch (e) {
+    console.warn('Error scheduling snooze notification:', e);
+    return null;
+  }
+}
+
+/**
  * Cancels all remaining scheduled notifications for an alarm (One-tap "Dismiss All")
  */
 export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem): Promise<void> {
@@ -212,7 +352,7 @@ export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem):
     for (const notifId of alarm.notificationIds) {
       try {
         await Notifications.cancelScheduledNotificationAsync(notifId);
-      } catch (_) {}
+      } catch {}
     }
   }
 }

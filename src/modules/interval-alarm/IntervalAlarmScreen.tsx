@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,86 +9,38 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Plus, BellRing } from 'lucide-react-native';
+import { Plus, Bell } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../core/theme';
 import { useAlarmStore } from './store/alarmStore';
 import { AlarmItem } from './types';
-import { findNextUpcomingAlarm } from './engine/intervalEngine';
 import { GreetingHeader } from './components/GreetingHeader';
-import { HeroAlarmCard } from './components/HeroAlarmCard';
 import { AlarmCardItem } from './components/AlarmCardItem';
-import { AlarmEditorModal } from './components/AlarmEditorModal';
+import { AlarmCreationModal } from './components/AlarmCreationModal';
+import { AlarmEditModal } from './components/AlarmEditModal';
 import { AlarmRingingOverlay } from './components/AlarmRingingOverlay';
+import { AlarmToastBanner } from './components/AlarmToastBanner';
 
 export const IntervalAlarmScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { colors, typography, radii, shadows, spacing } = useTheme();
+  const { colors, typography, radii, shadows } = useTheme();
   const {
     alarms,
     addAlarm,
     updateAlarm,
     deleteAlarm,
     toggleAlarm,
-    setActiveRinging,
   } = useAlarmStore();
 
-  const [editorVisible, setEditorVisible] = useState(false);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState<AlarmItem | null>(null);
-  const [countdownText, setCountdownText] = useState<string>('No upcoming alarms');
-
-  // Find next upcoming enabled alarm for the Hero card
-  const upcomingInfo = findNextUpcomingAlarm(alarms);
-
-  // Dynamic countdown timer (updates reactively on alarm change and every 30s)
-  useEffect(() => {
-    const updateCountdown = () => {
-      const info = findNextUpcomingAlarm(alarms);
-      if (info) {
-        setCountdownText(info.countdownText);
-      } else {
-        setCountdownText('All alarms are paused');
-      }
-    };
-
-    updateCountdown();
-    const interval = setInterval(updateCountdown, 30000);
-    return () => clearInterval(interval);
-  }, [alarms]);
 
   const handleOpenAddModal = () => {
-    Haptics.selectionAsync();
-    setEditingAlarm(null);
-    setEditorVisible(true);
+    setCreateModalVisible(true);
   };
 
   const handleOpenEditModal = (alarm: AlarmItem) => {
-    Haptics.selectionAsync();
     setEditingAlarm(alarm);
-    setEditorVisible(true);
-  };
-
-  const handleSaveAlarm = async (alarmData: Omit<AlarmItem, 'id'>) => {
-    if (editingAlarm) {
-      await updateAlarm(editingAlarm.id, alarmData);
-    } else {
-      await addAlarm(alarmData);
-    }
-  };
-
-  // Demo simulator trigger for instant verification of ringing experience
-  const handleTestRing = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const target = upcomingInfo?.nextAlarm || alarms[0];
-    if (target) {
-      setActiveRinging({
-        alarm: target,
-        currentStepIndex: 2,
-        totalSteps: 7,
-        currentTimeString: '06:50 AM',
-      });
-    }
   };
 
   // Status bar inset calculation for Android & iOS
@@ -114,104 +66,55 @@ export const IntervalAlarmScreen: React.FC = () => {
           },
         ]}
       >
-        {/* Serene Love Note Greeting (with ample status bar clearance) */}
+        {/* Native Alarms Header */}
         <GreetingHeader />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: 110, paddingTop: 8 }}
         >
-          {/* Top Hero Alarm Card (Distinctly styled and reactively switches to next enabled alarm) */}
-          {upcomingInfo?.nextAlarm ? (
-            <HeroAlarmCard
-              alarm={upcomingInfo.nextAlarm}
-              countdownText={countdownText}
-              onPressCard={() => handleOpenEditModal(upcomingInfo.nextAlarm)}
-              onToggle={() => toggleAlarm(upcomingInfo.nextAlarm.id)}
-            />
+          {/* List of Alarms or Clean Empty State */}
+          {alarms.length > 0 ? (
+            alarms.map((alarm) => (
+              <AlarmCardItem
+                key={alarm.id}
+                alarm={alarm}
+                onPressCard={() => handleOpenEditModal(alarm)}
+                onToggle={() => toggleAlarm(alarm.id)}
+              />
+            ))
           ) : (
-            <View
-              style={[
-                styles.emptyHeroCard,
-                {
-                  backgroundColor: colors.surfaceHero,
-                  borderColor: colors.surfaceBorder,
-                  borderRadius: radii.cardOuter,
-                  marginHorizontal: spacing.lg,
-                  marginVertical: spacing.sm,
-                  padding: spacing.xl,
-                },
-              ]}
-            >
+            <View style={styles.emptyContainer}>
+              <View
+                style={[
+                  styles.emptyIconCircle,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.surfaceBorder,
+                    borderRadius: radii.cardOuter,
+                  },
+                ]}
+              >
+                <Bell size={36} color={colors.textMuted} strokeWidth={1.8} />
+              </View>
               <Text
                 style={[
-                  styles.emptyHeroTitle,
+                  styles.emptyTitle,
                   { color: colors.textPrimary, fontFamily: typography.numbersBold },
                 ]}
               >
-                All Alarms Are Paused
+                No Alarms
               </Text>
               <Text
                 style={[
-                  styles.emptyHeroSub,
-                  { color: colors.textMuted, fontFamily: typography.numbersRegular },
+                  styles.emptySubtitle,
+                  { color: colors.textSecondary, fontFamily: typography.numbersRegular },
                 ]}
               >
-                Toggle any alarm on below or tap the (+) button to create a new one.
+                Tap + below to set your first alarm.
               </Text>
             </View>
           )}
-
-          {/* Section Header */}
-          <View
-            style={[
-              styles.sectionHeaderRow,
-              { paddingHorizontal: spacing.lg, marginTop: spacing.md },
-            ]}
-          >
-            <Text
-              style={[
-                styles.sectionHeaderTitle,
-                { color: colors.textSecondary, fontFamily: typography.numbersBold },
-              ]}
-            >
-              ALL ALARMS ({alarms.length})
-            </Text>
-
-            {/* Quick Test Alarm Ring Preview Button */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={handleTestRing}
-              style={[
-                styles.testRingPill,
-                {
-                  backgroundColor: colors.surfaceSubtle,
-                  borderColor: colors.surfaceBorder,
-                  borderRadius: radii.pill,
-                },
-              ]}
-            >
-              <BellRing size={12} color={colors.primary} strokeWidth={2.2} />
-              <Text
-                style={[
-                  styles.testRingText,
-                  { color: colors.primary, fontFamily: typography.numbersBold },
-                ]}
-              >
-                Preview Ring
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* List of Saved Alarms */}
-          {alarms.map((alarm) => (
-            <AlarmCardItem
-              key={alarm.id}
-              alarm={alarm}
-              onPressCard={() => handleOpenEditModal(alarm)}
-              onToggle={() => toggleAlarm(alarm.id)}
-            />
-          ))}
         </ScrollView>
 
         {/* Floating Action Button (+) */}
@@ -222,9 +125,10 @@ export const IntervalAlarmScreen: React.FC = () => {
             styles.fab,
             shadows.buttonPrimary,
             {
-              backgroundColor: colors.primary,
+              backgroundColor: colors.textPrimary,
               borderRadius: radii.squircleToggle,
-              bottom: bottomInset + 20,
+              right: 16,
+              bottom: bottomInset + 16,
             },
           ]}
           accessibilityLabel="Add new alarm"
@@ -232,17 +136,36 @@ export const IntervalAlarmScreen: React.FC = () => {
           <Plus size={28} color={colors.textOnPrimary} strokeWidth={2.6} />
         </TouchableOpacity>
 
-        {/* Alarm Creation / Edit Modal */}
-        <AlarmEditorModal
-          visible={editorVisible}
-          initialAlarm={editingAlarm}
-          onClose={() => setEditorVisible(false)}
-          onSave={handleSaveAlarm}
-          onDelete={deleteAlarm}
+        {/* Alarm Creation Modal */}
+        <AlarmCreationModal
+          visible={createModalVisible}
+          onClose={() => setCreateModalVisible(false)}
+          onSave={addAlarm}
         />
+
+        {/* Alarm Edit Modal */}
+        {editingAlarm && (
+          <AlarmEditModal
+            visible={Boolean(editingAlarm)}
+            alarm={editingAlarm}
+            onClose={() => setEditingAlarm(null)}
+            onSave={(updatedData) => {
+              if (editingAlarm) {
+                updateAlarm(editingAlarm.id, updatedData);
+              }
+            }}
+            onDelete={deleteAlarm}
+          />
+        )}
 
         {/* Active Ringing Overlay with Dismiss All Remaining */}
         <AlarmRingingOverlay />
+
+        {/* Alarm Set Duration Toast: end-to-end matching side margins of alarm list */}
+        <AlarmToastBanner
+          bottomOffset={bottomInset + 16 + 60 + 16}
+          horizontalMargin={16}
+        />
       </View>
     </View>
   );
@@ -255,44 +178,31 @@ const styles = StyleSheet.create({
   safeAreaContainer: {
     flex: 1,
   },
-  emptyHeroCard: {
-    borderWidth: 1.5,
+  emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 120,
+    paddingHorizontal: 24,
   },
-  emptyHeroTitle: {
-    fontSize: 18,
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
     marginBottom: 6,
   },
-  emptyHeroSub: {
-    fontSize: 13,
+  emptySubtitle: {
+    fontSize: 14,
     textAlign: 'center',
-    lineHeight: 18,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sectionHeaderTitle: {
-    fontSize: 12,
-    letterSpacing: 0.6,
-  },
-  testRingPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-  },
-  testRingText: {
-    fontSize: 11,
   },
   fab: {
     position: 'absolute',
-    right: 24,
+    right: 16,
     width: 60,
     height: 60,
     justifyContent: 'center',

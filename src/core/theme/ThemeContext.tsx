@@ -1,40 +1,50 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import { darkTheme, ThemeColors } from './colors';
 import { Typography } from './typography';
 import { Radii } from './radii';
 import { Shadows } from './shadows';
 import { Spacing } from './spacing';
 
-interface ThemeContextValue {
+export interface ThemeContextValue {
   colors: ThemeColors;
   typography: typeof Typography;
   radii: typeof Radii;
   shadows: typeof Shadows;
   spacing: typeof Spacing;
+  themeMode: 'dark';
 }
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
+const defaultContextValue: ThemeContextValue = {
+  colors: darkTheme,
+  typography: Typography,
+  radii: Radii,
+  shadows: Shadows,
+  spacing: Spacing,
+  themeMode: 'dark',
+};
+
+const ThemeContext = createContext<ThemeContextValue>(defaultContextValue);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const value = useMemo(
+    () => ({
+      colors: darkTheme,
+      typography: Typography,
+      radii: Radii,
+      shadows: Shadows,
+      spacing: Spacing,
+      themeMode: 'dark' as const,
+    }),
+    []
+  );
+
   return (
-    <ThemeContext.Provider
-      value={{
-        colors: darkTheme,
-        typography: Typography,
-        radii: Radii,
-        shadows: Shadows,
-        spacing: Spacing,
-      }}
-    >
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );
 };
 
 export const useTheme = (): ThemeContextValue => {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return ctx;
+  return useContext(ThemeContext) || defaultContextValue;
 };

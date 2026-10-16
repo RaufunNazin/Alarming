@@ -1,5 +1,5 @@
 {
-  "name": "alarm",
+  "name": "alarming",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
@@ -22,14 +22,19 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@emnapi/core": "1.11.3",
+    "@emnapi/runtime": "1.11.3",
     "@types/react": "~19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "expo lint"
   },
   "private": true
 }

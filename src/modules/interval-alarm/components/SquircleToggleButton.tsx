@@ -1,7 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, StyleSheet } from 'react-native';
 import { Bell, BellOff } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../../core/theme';
 
 interface SquircleToggleButtonProps {
@@ -18,11 +17,6 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = ({
   const { colors, radii, shadows } = useTheme();
 
   const handlePress = () => {
-    Haptics.impactAsync(
-      isEnabled
-        ? Haptics.ImpactFeedbackStyle.Light
-        : Haptics.ImpactFeedbackStyle.Medium
-    );
     onToggle();
   };
 
@@ -63,6 +57,6 @@ const styles = StyleSheet.create({
   squircle: {
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
   },
 });

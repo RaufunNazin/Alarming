@@ -1,20 +1,33 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AlarmItem } from '../../modules/interval-alarm/types';
+import { AlarmItem, AlarmType } from '../../modules/interval-alarm/types';
 
-const ALARMS_STORAGE_KEY = '@amour_alarms_list_v1';
-const GREETING_STORAGE_KEY = '@amour_love_note_greeting_v1';
+const ALARMS_STORAGE_KEY = '@alarming_alarms_list_v1';
+const LEGACY_ALARMS_STORAGE_KEY = '@amour_alarms_list_v1';
+
+const GREETING_STORAGE_KEY = '@alarming_greeting_v1';
+const LEGACY_GREETING_STORAGE_KEY = '@amour_love_note_greeting_v1';
+
+const LAST_SELECTED_TYPE_KEY = '@alarming_last_selected_alarm_type_v1';
+const LEGACY_LAST_SELECTED_TYPE_KEY = '@amour_last_selected_alarm_type_v1';
 
 export const AlarmStorage = {
   async getAlarms(): Promise<AlarmItem[]> {
     try {
-      const data = await AsyncStorage.getItem(ALARMS_STORAGE_KEY);
+      let data = await AsyncStorage.getItem(ALARMS_STORAGE_KEY);
+      if (!data) {
+        // Seamless migration from legacy storage key
+        data = await AsyncStorage.getItem(LEGACY_ALARMS_STORAGE_KEY);
+        if (data) {
+          await AsyncStorage.setItem(ALARMS_STORAGE_KEY, data);
+        }
+      }
       if (data) {
         return JSON.parse(data);
       }
     } catch (e) {
       console.warn('Error reading alarms from storage:', e);
     }
-    // Default initial alarm (e.g. 06:30 AM to 07:30 AM interval alarm)
+    // Default initial alarm
     return [
       {
         id: 'default_morning_wakeup',
@@ -41,9 +54,35 @@ export const AlarmStorage = {
     }
   },
 
+  async getLastSelectedAlarmType(): Promise<AlarmType> {
+    try {
+      let type = await AsyncStorage.getItem(LAST_SELECTED_TYPE_KEY);
+      if (!type) {
+        type = await AsyncStorage.getItem(LEGACY_LAST_SELECTED_TYPE_KEY);
+      }
+      if (type === 'single' || type === 'interval' || type === 'offset') {
+        return type;
+      }
+    } catch (e) {
+      console.warn('Error reading last selected alarm type:', e);
+    }
+    return 'single';
+  },
+
+  async saveLastSelectedAlarmType(type: AlarmType): Promise<void> {
+    try {
+      await AsyncStorage.setItem(LAST_SELECTED_TYPE_KEY, type);
+    } catch (e) {
+      console.warn('Error saving last selected alarm type:', e);
+    }
+  },
+
   async getLoveNoteGreeting(): Promise<string> {
     try {
-      const note = await AsyncStorage.getItem(GREETING_STORAGE_KEY);
+      let note = await AsyncStorage.getItem(GREETING_STORAGE_KEY);
+      if (!note) {
+        note = await AsyncStorage.getItem(LEGACY_GREETING_STORAGE_KEY);
+      }
       if (note) return note;
     } catch (e) {
       console.warn('Error reading greeting:', e);

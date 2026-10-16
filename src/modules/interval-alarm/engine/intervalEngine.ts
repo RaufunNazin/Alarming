@@ -19,6 +19,16 @@ export function formatTime12h(hour: number, minute: number): string {
 }
 
 /**
+ * Calculates the next full hour from a given date (default: now).
+ * e.g. 11:10 AM -> 12:00 PM (hour: 12, minute: 0)
+ * e.g. 11:59 PM -> 12:00 AM (hour: 0, minute: 0)
+ */
+export function getNextHourTime(fromDate: Date = new Date()): { hour: number; minute: number } {
+  const nextHour = (fromDate.getHours() + 1) % 24;
+  return { hour: nextHour, minute: 0 };
+}
+
+/**
  * Generates all interval time steps between Start Time and End Time.
  * Handles midnight rollover (e.g. 23:45 to 00:30).
  */
@@ -70,6 +80,174 @@ export function generateIntervalSequence(
 }
 
 /**
+ * Generates interval time steps for an Offset Alarm:
+ * e.g. Target 07:00 AM, Before, 10 alarms, 5m interval
+ * Steps: 06:15, 06:20, 06:25 ... 07:00 AM (10 steps)
+ */
+export function generateOffsetSequence(
+  targetHour: number,
+  targetMinute: number,
+  direction: 'before' | 'after' = 'before',
+  count: number = 10,
+  intervalMinutes: number = 5
+): IntervalStep[] {
+  const safeCount = Math.max(1, Math.min(30, count || 10));
+  const safeInterval = Math.max(1, Math.min(60, intervalMinutes || 5));
+  const targetTotal = targetHour * 60 + targetMinute;
+
+  const steps: IntervalStep[] = [];
+
+  if (direction === 'before') {
+    // Alarms count down towards target time
+    const startTotal = targetTotal - (safeCount - 1) * safeInterval;
+    for (let i = 0; i < safeCount; i++) {
+      let stepTotal = startTotal + i * safeInterval;
+      // Handle negative wrap (e.g. crossing midnight backwards)
+      while (stepTotal < 0) {
+        stepTotal += 24 * 60;
+      }
+      const normalizedMinutes = stepTotal % (24 * 60);
+      const hour = Math.floor(normalizedMinutes / 60);
+      const minute = normalizedMinutes % 60;
+      steps.push({
+        timeString: formatTime12h(hour, minute),
+        hour,
+        minute,
+        totalMinutesFromStart: i * safeInterval,
+      });
+    }
+  } else {
+    // Alarms start at target time and continue after
+    for (let i = 0; i < safeCount; i++) {
+      let stepTotal = targetTotal + i * safeInterval;
+      const normalizedMinutes = stepTotal % (24 * 60);
+      const hour = Math.floor(normalizedMinutes / 60);
+      const minute = normalizedMinutes % 60;
+      steps.push({
+        timeString: formatTime12h(hour, minute),
+        hour,
+        minute,
+        totalMinutesFromStart: i * safeInterval,
+      });
+    }
+  }
+
+  return steps;
+}
+
+/**
+ * Returns formatted time display string for any AlarmItem (single, interval, offset)
+ */
+export function formatAlarmTimeDisplay(alarm: AlarmItem): string {
+  if (alarm.type === 'single') {
+    return formatTime12h(alarm.startHour, alarm.startMinute);
+  }
+
+  if (alarm.type === 'interval') {
+    const endH = alarm.endHour ?? alarm.startHour;
+    const endM = alarm.endMinute ?? alarm.startMinute;
+    return `${formatTime12h(alarm.startHour, alarm.startMinute)} – ${formatTime12h(endH, endM)}`;
+  }
+
+  if (alarm.type === 'offset') {
+    const seq = generateOffsetSequence(
+      alarm.startHour,
+      alarm.startMinute,
+      alarm.offsetDirection || 'before',
+      alarm.alarmCount || 10,
+      alarm.intervalMinutes || 5
+    );
+    if (seq.length > 0) {
+      const first = seq[0].timeString;
+      const last = seq[seq.length - 1].timeString;
+      return `${first} – ${last}`;
+    }
+    return formatTime12h(alarm.startHour, alarm.startMinute);
+  }
+
+  return formatTime12h(alarm.startHour, alarm.startMinute);
+}
+
+/**
+ * Smart schedule formatter for alarm cards:
+ * "Today", "Tomorrow", "Every day", "Sun–Thu", "Mon–Fri", "Weekends", etc.
+ */
+export function getSmartScheduleString(alarm: AlarmItem, referenceDate: Date = new Date()): string {
+  // If one-off / no repeat
+  if (!alarm.repeatDays || alarm.repeatDays.length === 0) {
+    const curHour = referenceDate.getHours();
+    const curMin = referenceDate.getMinutes();
+
+    let triggerHour = alarm.startHour;
+    let triggerMinute = alarm.startMinute;
+
+    // For offset alarms with 'before', earliest trigger is the first step
+    if (alarm.type === 'offset' && alarm.offsetDirection === 'before') {
+      const seq = generateOffsetSequence(
+        alarm.startHour,
+        alarm.startMinute,
+        'before',
+        alarm.alarmCount || 10,
+        alarm.intervalMinutes || 5
+      );
+      if (seq.length > 0) {
+        triggerHour = seq[0].hour;
+        triggerMinute = seq[0].minute;
+      }
+    }
+
+    const alarmMins = triggerHour * 60 + triggerMinute;
+    const nowMins = curHour * 60 + curMin;
+
+    return alarmMins > nowMins ? 'Today' : 'Tomorrow';
+  }
+
+  const days = alarm.repeatDays.slice().sort((a, b) => a - b);
+
+  if (days.length === 7) {
+    return 'Every day';
+  }
+
+  // Weekdays (Mon-Fri) [1, 2, 3, 4, 5]
+  if (days.length === 5 && days.join(',') === '1,2,3,4,5') {
+    return 'Mon–Fri';
+  }
+
+  // Sun-Thu [0, 1, 2, 3, 4]
+  if (days.length === 5 && days.join(',') === '0,1,2,3,4') {
+    return 'Sun–Thu';
+  }
+
+  // Weekends [0, 6]
+  if (days.length === 2 && days.join(',') === '0,6') {
+    return 'Weekends';
+  }
+
+  // Fri-Sat [5, 6]
+  if (days.length === 2 && days.join(',') === '5,6') {
+    return 'Fri–Sat';
+  }
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Check if consecutive range e.g. Mon-Thu (1,2,3,4)
+  let isConsecutive = true;
+  for (let i = 1; i < days.length; i++) {
+    if (days[i] !== days[i - 1] + 1) {
+      isConsecutive = false;
+      break;
+    }
+  }
+
+  if (isConsecutive && days.length >= 3) {
+    return `${dayNames[days[0]]}–${dayNames[days[days.length - 1]]}`;
+  }
+
+  // Fallback to joined day initials/names
+  return days.map((d) => dayNames[d]).join(', ');
+}
+
+/**
  * Calculates the exact next Date when an alarm will trigger.
  */
 export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = new Date()): Date {
@@ -79,6 +257,24 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
   const currentMinute = now.getMinutes();
   const currentSeconds = now.getSeconds();
 
+  let effectiveHour = alarm.startHour;
+  let effectiveMinute = alarm.startMinute;
+
+  // If offset before, trigger begins at the earliest step
+  if (alarm.type === 'offset' && alarm.offsetDirection === 'before') {
+    const seq = generateOffsetSequence(
+      alarm.startHour,
+      alarm.startMinute,
+      'before',
+      alarm.alarmCount || 10,
+      alarm.intervalMinutes || 5
+    );
+    if (seq.length > 0) {
+      effectiveHour = seq[0].hour;
+      effectiveMinute = seq[0].minute;
+    }
+  }
+
   const isTodayDismissed =
     alarm.dismissedForToday &&
     alarm.lastDismissedDate === now.toISOString().slice(0, 10);
@@ -86,14 +282,13 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
   // If alarm is One-Off (empty repeatDays)
   if (!alarm.repeatDays || alarm.repeatDays.length === 0) {
     const target = new Date(now);
-    target.setHours(alarm.startHour, alarm.startMinute, 0, 0);
+    target.setHours(effectiveHour, effectiveMinute, 0, 0);
 
     const isPastToday =
-      currentHour > alarm.startHour ||
-      (currentHour === alarm.startHour && currentMinute >= alarm.startMinute && currentSeconds >= 1);
+      currentHour > effectiveHour ||
+      (currentHour === effectiveHour && currentMinute >= effectiveMinute && currentSeconds >= 1);
 
     if (isPastToday || isTodayDismissed) {
-      // Advance to tomorrow
       target.setDate(target.getDate() + 1);
     }
     return target;
@@ -105,7 +300,7 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
     if (alarm.repeatDays.includes(candidateDay)) {
       const target = new Date(now);
       target.setDate(target.getDate() + offset);
-      target.setHours(alarm.startHour, alarm.startMinute, 0, 0);
+      target.setHours(effectiveHour, effectiveMinute, 0, 0);
 
       const candidateDateStr = target.toISOString().slice(0, 10);
       const isCandidateDismissed =
@@ -113,8 +308,8 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
 
       if (offset === 0) {
         const isPastToday =
-          currentHour > alarm.startHour ||
-          (currentHour === alarm.startHour && currentMinute >= alarm.startMinute);
+          currentHour > effectiveHour ||
+          (currentHour === effectiveHour && currentMinute >= effectiveMinute);
 
         if (!isPastToday && !isCandidateDismissed) {
           return target;
@@ -127,10 +322,9 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
     }
   }
 
-  // Default fallback: 1 week ahead
   const fallback = new Date(now);
   fallback.setDate(fallback.getDate() + 1);
-  fallback.setHours(alarm.startHour, alarm.startMinute, 0, 0);
+  fallback.setHours(effectiveHour, effectiveMinute, 0, 0);
   return fallback;
 }
 
@@ -142,7 +336,7 @@ export function getGoogleCountdownText(targetDate: Date, referenceDate: Date = n
   const diffMs = targetDate.getTime() - referenceDate.getTime();
 
   if (diffMs <= 0) {
-    return 'Alarm ringing now';
+    return 'Ringing now';
   }
 
   const totalMinutes = Math.floor(diffMs / (1000 * 60));
@@ -152,24 +346,97 @@ export function getGoogleCountdownText(targetDate: Date, referenceDate: Date = n
 
   if (days > 0) {
     const dayStr = days === 1 ? '1 day' : `${days} days`;
-    const hourStr = hours === 1 ? '1 hour' : `${hours} hours`;
-    return `Alarm rings in ${dayStr}, ${hourStr}`;
+    const hourStr = hours === 1 ? '1 hr' : `${hours} hrs`;
+    return `Rings in ${dayStr}, ${hourStr}`;
   }
 
   if (hours > 0) {
     const hourStr = hours === 1 ? '1 hour' : `${hours} hours`;
     if (minutes === 0) {
-      return `Alarm rings in ${hourStr}`;
+      return `Rings in ${hourStr}`;
     }
-    const minStr = minutes === 1 ? '1 minute' : `${minutes} minutes`;
-    return `Alarm rings in ${hourStr} ${minStr}`;
+    const minStr = minutes === 1 ? '1 min' : `${minutes} mins`;
+    return `Rings in ${hourStr} ${minStr}`;
   }
 
   if (minutes > 0) {
-    return `Alarm rings in ${minutes === 1 ? '1 minute' : `${minutes} minutes`}`;
+    return `Rings in ${minutes === 1 ? '1 minute' : `${minutes} minutes`}`;
   }
 
-  return 'Alarm rings in less than a minute';
+  return 'Rings in less than a minute';
+}
+
+/**
+ * Returns user-facing toast text confirming how long until the alarm rings:
+ * e.g. "Alarm set for 8 hours and 30 minutes from now"
+ * Directly allows the user to catch AM vs PM mistakes.
+ */
+export function getAlarmSetDurationToastText(targetDate: Date, referenceDate: Date = new Date()): string {
+  const diffMs = targetDate.getTime() - referenceDate.getTime();
+  if (diffMs <= 0) {
+    return 'Alarm set for less than a minute from now';
+  }
+
+  const totalMinutes = Math.round(diffMs / (1000 * 60));
+  if (totalMinutes <= 0) {
+    return 'Alarm set for less than a minute from now';
+  }
+
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts: string[] = [];
+  if (days > 0) {
+    parts.push(days === 1 ? '1 day' : `${days} days`);
+  }
+  if (hours > 0) {
+    parts.push(hours === 1 ? '1 hour' : `${hours} hours`);
+  }
+  if (minutes > 0) {
+    parts.push(minutes === 1 ? '1 minute' : `${minutes} minutes`);
+  }
+
+  if (parts.length === 0) {
+    return 'Alarm set for less than a minute from now';
+  }
+
+  let durationStr = '';
+  if (parts.length === 1) {
+    durationStr = parts[0];
+  } else if (parts.length === 2) {
+    durationStr = `${parts[0]} and ${parts[1]}`;
+  } else {
+    durationStr = `${parts[0]}, ${parts[1]} and ${parts[2]}`;
+  }
+
+  return `Alarm set for ${durationStr} from now`;
+}
+
+/**
+ * Calculates the exact toast message from an alarm object definition.
+ */
+export function getAlarmToastMessage(
+  alarm: Partial<AlarmItem> & { startHour: number; startMinute: number },
+  referenceDate: Date = new Date()
+): string {
+  const fullAlarm: AlarmItem = {
+    id: alarm.id || 'temp',
+    type: alarm.type || 'single',
+    startHour: alarm.startHour,
+    startMinute: alarm.startMinute,
+    endHour: alarm.endHour,
+    endMinute: alarm.endMinute,
+    offsetDirection: alarm.offsetDirection,
+    alarmCount: alarm.alarmCount,
+    intervalMinutes: alarm.intervalMinutes,
+    repeatDays: alarm.repeatDays || [],
+    label: alarm.label || '',
+    isEnabled: true,
+    dismissedForToday: false,
+  };
+  const targetDate = calculateNextOccurrence(fullAlarm, referenceDate);
+  return getAlarmSetDurationToastText(targetDate, referenceDate);
 }
 
 /**
@@ -203,7 +470,7 @@ export function findNextUpcomingAlarm(
 }
 
 /**
- * Formats repeat days into readable summary (e.g. "Mon, Tue, Wed, Thu, Fri", "Every day", "One-off")
+ * Formats repeat days into readable summary
  */
 export function formatRepeatDays(repeatDays: number[]): string {
   if (!repeatDays || repeatDays.length === 0) {
@@ -217,6 +484,12 @@ export function formatRepeatDays(repeatDays: number[]): string {
     [1, 2, 3, 4, 5].every((d) => repeatDays.includes(d))
   ) {
     return 'Weekdays (Mon–Fri)';
+  }
+  if (
+    repeatDays.length === 5 &&
+    [0, 1, 2, 3, 4].every((d) => repeatDays.includes(d))
+  ) {
+    return 'Sun–Thu';
   }
   if (
     repeatDays.length === 2 &&

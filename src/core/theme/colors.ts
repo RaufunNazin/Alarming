@@ -1,10 +1,10 @@
 export interface ThemeColors {
-  // 60% Dominant Canvas (Deep Midnight Charcoal, serene & quiet)
+  // Canvas
   canvasGradientStart: string;
   canvasGradientEnd: string;
   background: string;
 
-  // 30% Structural Surfaces & Typography
+  // Surfaces & Typography
   surface: string;
   surfaceHero: string;
   surfaceElevated: string;
@@ -12,16 +12,23 @@ export interface ThemeColors {
   surfaceBorder: string;
   surfaceBorderHighlight: string;
 
+  // Card On / Off distinction
+  cardOnBg: string;
+  cardOnBorder: string;
+  cardOffBg: string;
+  cardOffBorder: string;
+
   textPrimary: string;
   textSecondary: string;
   textMuted: string;
   textOnPrimary: string;
 
-  // 10% Accents (Muted Dusty Rose & Warm Sand - gentle & glare-free)
+  // Accents
   primary: string;
   primaryLight: string;
   primaryDark: string;
   primaryMuted: string;
+  accent: string;
   accentGold: string;
   success: string;
   danger: string;
@@ -53,58 +60,61 @@ export interface ThemeColors {
   overlaySecondaryText: string;
 }
 
+// 1. PURE DARK MODE (Dark + White + Crimson Accent) - Zero Beige
 export const darkTheme: ThemeColors = {
-  // 60% Midnight Charcoal Canvas (Quiet, serene, non-glaring)
-  canvasGradientStart: '#111012',
-  canvasGradientEnd: '#161518',
-  background: '#111012',
+  canvasGradientStart: '#0F0F11',
+  canvasGradientEnd: '#141417',
+  background: '#0F0F11',
 
-  // 30% Structural Surfaces
-  surface: '#1A191D',              // Standard alarm card
-  surfaceHero: '#242129',          // Distinct Hero card surface
-  surfaceElevated: '#201E25',      // Modal background
-  surfaceSubtle: '#27252D',        // Chips, inputs & subtle backgrounds
-  surfaceBorder: '#2C2933',        // Elegant low-contrast border
-  surfaceBorderHighlight: '#484052', // Distinct Hero card border highlight
+  surface: '#18181B',
+  surfaceHero: '#202024',
+  surfaceElevated: '#18181B',
+  surfaceSubtle: '#27272B',
+  surfaceBorder: 'rgba(255, 255, 255, 0.08)',
+  surfaceBorderHighlight: 'rgba(255, 255, 255, 0.16)',
 
-  // Text
-  textPrimary: '#F2EEF3',          // Soft warm off-white (not stark white)
-  textSecondary: '#C5BDCA',        // Muted grey-lavender
-  textMuted: '#7E7785',            // Subdued metadata
-  textOnPrimary: '#FFFFFF',
+  // Card On / Off distinction for Dark Mode
+  cardOnBg: '#1B1B1F',                         // Slightly elevated slate
+  cardOnBorder: 'rgba(255, 255, 255, 0.09)',
+  cardOffBg: '#131316',                        // Receded shade blending into dark canvas
+  cardOffBorder: 'rgba(255, 255, 255, 0.04)',
 
-  // 10% Accents: Muted Dusty Rose & Warm Sand (Gentle, never neon)
-  primary: '#C9939B',              // Muted Dusty Rose
-  primaryLight: '#D8A7AF',
-  primaryDark: '#B37D85',
-  primaryMuted: 'rgba(201, 147, 155, 0.16)',
-  accentGold: '#D4A373',           // Soft warm sand
-  success: '#81B29A',              // Muted sage green
-  danger: '#E07A5F',               // Muted terracotta
+  textPrimary: '#FFFFFF',            // Crisp pure white
+  textSecondary: '#A1A1AA',          // Light silver neutral
+  textMuted: '#71717A',              // Subdued hint grey
+  textOnPrimary: '#0F0F11',
 
-  // Squircle Toggle (54x54px)
-  squircleOnBg: '#C9939B',
-  squircleOffBg: '#232128',
-  squircleBorder: '#35313D',
-  squircleBorderOn: '#D8A7AF',
-  squircleIconOn: '#151417',        // Crisp dark icon on dusty rose
-  squircleIconOff: '#7E7785',
+  primary: '#AD343E',                // Rich Crimson
+  primaryLight: '#C94D58',
+  primaryDark: '#8C2730',
+  primaryMuted: 'rgba(173, 52, 62, 0.18)',
+  accent: '#AD343E',
+  accentGold: '#C94D58',
+  success: '#4c956c',
+  danger: '#dc6040',
 
-  // Clock Dial
-  dialFaceBg: '#18171B',
-  dialHandColor: '#C9939B',
-  dialCenterDot: '#D8A7AF',
+  squircleOnBg: '#AD343E',
+  squircleOffBg: '#27272B',
+  squircleBorder: 'rgba(255, 255, 255, 0.08)',
+  squircleBorderOn: '#C94D58',
+  squircleIconOn: '#FFFFFF',
+  squircleIconOff: '#71717A',
+
+  dialFaceBg: '#18181B',
+  dialHandColor: '#AD343E',
+  dialCenterDot: '#AD343E',
   dialNumberActive: '#FFFFFF',
-  dialNumberInactive: '#F2EEF3',
-  amPmActiveBg: 'rgba(201, 147, 155, 0.22)',
-  amPmActiveText: '#D8A7AF',
-  amPmInactiveText: '#7E7785',
+  dialNumberInactive: '#A1A1AA',
+  amPmActiveBg: 'rgba(173, 52, 62, 0.22)',
+  amPmActiveText: '#FFFFFF',
+  amPmInactiveText: '#A1A1AA',
 
-  // Ringing Overlay
-  overlayBackdrop: 'rgba(12, 11, 14, 0.96)',
-  overlayPrimaryBg: '#C9939B',
-  overlayPrimaryText: '#151417',
-  overlaySecondaryBorder: '#35313D',
-  overlaySecondaryBg: 'rgba(35, 33, 40, 0.75)',
-  overlaySecondaryText: '#C5BDCA',
+  overlayBackdrop: 'rgba(15, 15, 17, 0.98)',
+  overlayPrimaryBg: '#FFFFFF',
+  overlayPrimaryText: '#0F0F11',
+  overlaySecondaryBorder: 'rgba(255, 255, 255, 0.12)',
+  overlaySecondaryBg: '#18181B',
+  overlaySecondaryText: '#A1A1AA',
 };
+
+export const theme: ThemeColors = darkTheme;

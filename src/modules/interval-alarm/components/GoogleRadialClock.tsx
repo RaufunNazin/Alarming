@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   Animated,
   PanResponder,
+  useWindowDimensions,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../../core/theme';
 
 interface GoogleRadialClockProps {
@@ -16,17 +16,21 @@ interface GoogleRadialClockProps {
   onTimeChange: (hour: number, minute: number) => void;
 }
 
-const RADIUS = 135;
-const PADDING = 25;
-const NUMBER_RADIUS = RADIUS - PADDING;
-const CLOCK_DIAMETER = RADIUS * 2;
-
 export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
   selectedHour,
   selectedMinute,
   onTimeChange,
 }) => {
   const { colors, typography, radii } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+
+  // Responsive +20% radius capped so it never overflows alarm toggle/display margins
+  const containerWidth = Math.min(windowWidth, 420);
+  const maxWidth = containerWidth - 32; // Limit matching marginHorizontal: 16 (16 each side)
+  const RADIUS = Math.min(162, Math.floor(maxWidth / 2)); // 135 * 1.2 = 162
+  const CLOCK_DIAMETER = RADIUS * 2;
+  const PADDING = 28;
+  const NUMBER_RADIUS = RADIUS - PADDING;
 
   const [mode, setMode] = useState<'hour' | 'minute'>('hour');
 
@@ -34,15 +38,20 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
   // Refs for PanResponder stale closures
   const modeRef = useRef(mode);
-  modeRef.current = mode;
   const isAMRef = useRef(isAM);
-  isAMRef.current = isAM;
   const selectedHourRef = useRef(selectedHour);
-  selectedHourRef.current = selectedHour;
   const selectedMinuteRef = useRef(selectedMinute);
-  selectedMinuteRef.current = selectedMinute;
+  const radiusRef = useRef(RADIUS);
 
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    modeRef.current = mode;
+    isAMRef.current = isAM;
+    selectedHourRef.current = selectedHour;
+    selectedMinuteRef.current = selectedMinute;
+    radiusRef.current = RADIUS;
+  });
+
+  const [fadeAnim] = useState(() => new Animated.Value(1));
   const clockCenterRef = useRef({ x: 0, y: 0 });
 
   const handleModeChange = (newMode: 'hour' | 'minute') => {
@@ -65,7 +74,6 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     if (!isAM) {
       const newHour = Math.max(0, selectedHour - 12);
       onTimeChange(newHour, selectedMinute);
-      Haptics.selectionAsync();
     }
   };
 
@@ -73,7 +81,6 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     if (isAM) {
       const newHour = Math.min(23, selectedHour + 12);
       onTimeChange(newHour, selectedMinute);
-      Haptics.selectionAsync();
     }
   };
 
@@ -107,16 +114,20 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
       if (newHour !== selectedHourRef.current) {
         onTimeChange(newHour, selectedMinuteRef.current);
-        Haptics.selectionAsync();
       }
     } else {
       const val = Math.round(deg / 6) % 60;
       if (val !== selectedMinuteRef.current) {
         onTimeChange(selectedHourRef.current, val);
-        Haptics.selectionAsync();
       }
     }
   };
+
+  const handleTouchOffsetRef = useRef(handleTouchOffset);
+  handleTouchOffsetRef.current = handleTouchOffset;
+
+  const handleModeChangeRef = useRef(handleModeChange);
+  handleModeChangeRef.current = handleModeChange;
 
   const panResponder = useRef(
     PanResponder.create({
@@ -124,21 +135,21 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
         const { pageX, pageY, locationX, locationY } = evt.nativeEvent;
+        const currentR = radiusRef.current;
         clockCenterRef.current = {
-          x: pageX - locationX + RADIUS,
-          y: pageY - locationY + RADIUS,
+          x: pageX - locationX + currentR,
+          y: pageY - locationY + currentR,
         };
-        handleTouchOffset(locationX - RADIUS, locationY - RADIUS);
+        handleTouchOffsetRef.current(locationX - currentR, locationY - currentR);
       },
       onPanResponderMove: (_evt, gestureState) => {
         const dx = gestureState.moveX - clockCenterRef.current.x;
         const dy = gestureState.moveY - clockCenterRef.current.y;
-        handleTouchOffset(dx, dy);
+        handleTouchOffsetRef.current(dx, dy);
       },
       onPanResponderRelease: () => {
         if (modeRef.current === 'hour') {
-          handleModeChange('minute');
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          handleModeChangeRef.current('minute');
         }
       },
     })
@@ -146,7 +157,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
   // Render dial numbers
   const renderNumbers = (isMask: boolean = false) => {
-    const elements = [];
+    const elements: React.ReactNode[] = [];
     const count = 12;
 
     for (let i = 1; i <= count; i++) {
@@ -188,7 +199,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* 12h Digital Display Header with exact imansync styling */}
+      {/* 12h Digital Display Header - Full width aligned with Alarm Selection bar */}
       <View style={styles.headerDisplay}>
         <View style={styles.timeGroup}>
           <TouchableOpacity
@@ -196,9 +207,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
             style={[
               styles.headerTimeBtn,
               {
-                backgroundColor: mode === 'hour' ? colors.amPmActiveBg : colors.surfaceSubtle,
+                backgroundColor: mode === 'hour' ? colors.primary + '25' : colors.surfaceSubtle,
                 borderColor: mode === 'hour' ? colors.primary : colors.surfaceBorder,
-                borderRadius: radii.timeBox,
+                borderRadius: radii.cardInner,
               },
             ]}
             onPress={() => handleModeChange('hour')}
@@ -207,7 +218,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               style={[
                 styles.timeText,
                 {
-                  color: mode === 'hour' ? colors.primary : colors.textMuted,
+                  color: mode === 'hour' ? colors.textPrimary : colors.textSecondary,
                   fontFamily: typography.numbersBold,
                 },
               ]}
@@ -230,9 +241,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
             style={[
               styles.headerTimeBtn,
               {
-                backgroundColor: mode === 'minute' ? colors.amPmActiveBg : colors.surfaceSubtle,
+                backgroundColor: mode === 'minute' ? colors.primary + '25' : colors.surfaceSubtle,
                 borderColor: mode === 'minute' ? colors.primary : colors.surfaceBorder,
-                borderRadius: radii.timeBox,
+                borderRadius: radii.cardInner,
               },
             ]}
             onPress={() => handleModeChange('minute')}
@@ -241,7 +252,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               style={[
                 styles.timeText,
                 {
-                  color: mode === 'minute' ? colors.primary : colors.textMuted,
+                  color: mode === 'minute' ? colors.textPrimary : colors.textSecondary,
                   fontFamily: typography.numbersBold,
                 },
               ]}
@@ -251,14 +262,14 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Vertical AM/PM Segmented Box from imansync */}
+        {/* Vertical AM/PM Segmented Box */}
         <View
           style={[
             styles.amPmContainer,
             {
               borderColor: colors.surfaceBorder,
               backgroundColor: colors.surfaceSubtle,
-              borderRadius: radii.chip,
+              borderRadius: radii.cardInner,
             },
           ]}
         >
@@ -266,7 +277,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
             activeOpacity={0.8}
             style={[
               styles.amPmBtn,
-              isAM && { backgroundColor: colors.amPmActiveBg },
+              isAM && { backgroundColor: colors.primary + '33' },
             ]}
             onPress={handleSetAM}
           >
@@ -274,7 +285,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               style={[
                 styles.amPmText,
                 {
-                  color: isAM ? colors.amPmActiveText : colors.amPmInactiveText,
+                  color: isAM ? colors.textPrimary : colors.textSecondary,
                   fontFamily: typography.numbersBold,
                 },
               ]}
@@ -287,7 +298,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
             activeOpacity={0.8}
             style={[
               styles.amPmBtn,
-              !isAM && { backgroundColor: colors.amPmActiveBg },
+              !isAM && { backgroundColor: colors.primary + '33' },
             ]}
             onPress={handleSetPM}
           >
@@ -295,7 +306,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               style={[
                 styles.amPmText,
                 {
-                  color: !isAM ? colors.amPmActiveText : colors.amPmInactiveText,
+                  color: !isAM ? colors.textPrimary : colors.textSecondary,
                   fontFamily: typography.numbersBold,
                 },
               ]}
@@ -306,11 +317,14 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
         </View>
       </View>
 
-      {/* Radial Clock Face */}
+      {/* Radial Clock Face (+20% size, dynamic) */}
       <View
         style={[
           styles.clockFace,
           {
+            width: CLOCK_DIAMETER,
+            height: CLOCK_DIAMETER,
+            borderRadius: RADIUS,
             backgroundColor: colors.dialFaceBg,
             borderColor: colors.surfaceBorder,
           },
@@ -332,7 +346,10 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
           <View
             style={[
               styles.handWrapper,
-              { transform: [{ rotate: `${currentAngle}deg` }] },
+              {
+                height: NUMBER_RADIUS * 2,
+                transform: [{ rotate: `${currentAngle}deg` }],
+              },
             ]}
           >
             <View style={[styles.handLine, { backgroundColor: colors.dialHandColor }]} />
@@ -371,7 +388,10 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
         </Animated.View>
 
         {/* Touch Overlay spanning clock face */}
-        <View {...panResponder.panHandlers} style={styles.touchOverlay} />
+        <View
+          {...panResponder.panHandlers}
+          style={[styles.touchOverlay, { borderRadius: RADIUS }]}
+        />
       </View>
     </View>
   );
@@ -384,36 +404,42 @@ const styles = StyleSheet.create({
   },
   headerDisplay: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    width: '100%',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginHorizontal: 16,
     marginBottom: 20,
-    gap: 12,
+    gap: 10,
   },
   timeGroup: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   headerTimeBtn: {
     flex: 1,
-    paddingVertical: 8,
+    height: 74,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   timeText: {
-    fontSize: 52,
-    lineHeight: 56,
+    fontSize: 50,
+    lineHeight: 54,
   },
   timeSeparator: {
-    fontSize: 48,
-    marginHorizontal: 4,
-    marginTop: -6,
+    fontSize: 36,
+    lineHeight: 40,
+    width: 14,
+    textAlign: 'center',
+    marginHorizontal: 1,
+    marginBottom: 4,
   },
   amPmContainer: {
+    width: 62,
+    height: 74,
     borderWidth: 1,
     overflow: 'hidden',
-    width: 64,
   },
   amPmBtn: {
     flex: 1,
@@ -421,16 +447,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   amPmText: {
-    fontSize: 14,
+    fontSize: 13,
   },
   amPmDivider: {
     height: 1,
     width: '100%',
   },
   clockFace: {
-    width: CLOCK_DIAMETER,
-    height: CLOCK_DIAMETER,
-    borderRadius: RADIUS,
     borderWidth: 1,
     position: 'relative',
     justifyContent: 'center',
@@ -438,7 +461,6 @@ const styles = StyleSheet.create({
   },
   touchOverlay: {
     ...StyleSheet.absoluteFill,
-    borderRadius: RADIUS,
     zIndex: 10,
   },
   numberContainer: {
@@ -462,7 +484,6 @@ const styles = StyleSheet.create({
   handWrapper: {
     position: 'absolute',
     width: 2,
-    height: NUMBER_RADIUS * 2,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 0,

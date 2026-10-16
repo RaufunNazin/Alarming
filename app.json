@@ -1,16 +1,17 @@
 {
   "expo": {
-    "name": "AmourAlarm",
-    "slug": "amouralarm",
+    "name": "Alarming",
+    "slug": "alarming",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.alarming.app"
     },
     "android": {
-      "package": "com.amour.alarm",
+      "package": "com.alarming.app",
       "adaptiveIcon": {
         "backgroundColor": "#111012",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -36,14 +37,14 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#C9939B"
+          "color": "#AD343E"
         }
       ],
       "./plugins/withAndroidAlarmChannel.js"
     ],
     "extra": {
       "eas": {
-        "projectId": "b58ba867-f34a-4365-9e0a-c267f4911750"
+        "projectId": "b3a4f329-c9ed-4f4c-8fd0-3e844e363f50"
       }
     }
   }

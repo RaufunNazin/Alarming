@@ -1,14 +1,37 @@
+import { Platform } from 'react-native';
+
 export const Typography = {
   // Cursive warm romantic font (for love note greeting & titles)
-  cursive: 'Caveat_600SemiBold',
-  cursiveBold: 'Caveat_700Bold',
-  cursiveRegular: 'Caveat_400Regular',
+  cursive: Platform.select({
+    web: 'Caveat, "Caveat_600SemiBold", cursive',
+    default: 'Caveat_600SemiBold',
+  }),
+  cursiveBold: Platform.select({
+    web: 'Caveat, "Caveat_700Bold", cursive',
+    default: 'Caveat_700Bold',
+  }),
+  cursiveRegular: Platform.select({
+    web: 'Caveat, "Caveat_400Regular", cursive',
+    default: 'Caveat_400Regular',
+  }),
 
   // Crisp geometric font (for clock dials, digits, times, metadata)
-  numbers: 'Outfit_600SemiBold',
-  numbersBold: 'Outfit_700Bold',
-  numbersRegular: 'Outfit_400Regular',
-  numbersLight: 'Outfit_300Light',
+  numbers: Platform.select({
+    web: 'Outfit, "Outfit_600SemiBold", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_600SemiBold',
+  }),
+  numbersBold: Platform.select({
+    web: 'Outfit, "Outfit_700Bold", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_700Bold',
+  }),
+  numbersRegular: Platform.select({
+    web: 'Outfit, "Outfit_400Regular", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_400Regular',
+  }),
+  numbersLight: Platform.select({
+    web: 'Outfit, "Outfit_300Light", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_300Light',
+  }),
 
   // Font sizes
   sizes: {

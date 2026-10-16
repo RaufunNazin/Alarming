@@ -24,6 +24,18 @@ import {
   ACTION_DISMISS_SINGLE,
 } from './src/core/notifications/alarmNotifier';
 
+const WEB_INITIAL_METRICS = {
+  insets: { top: 0, right: 0, bottom: 0, left: 0 },
+  frame: {
+    x: 0,
+    y: 0,
+    width: typeof window !== 'undefined' ? window.innerWidth : 480,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  },
+};
+
+const ActiveScreen = getActiveModule();
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     Caveat_400Regular,
@@ -36,17 +48,33 @@ export default function App() {
     Outfit_700Bold,
   });
 
-  const {
-    initialize,
-    dismissAllRemainingForToday,
-    dismissSingleAlarm,
-    setActiveRinging,
-    alarms,
-  } = useAlarmStore();
+  const initialize = useAlarmStore((s) => s.initialize);
+  const dismissAllRemainingForToday = useAlarmStore((s) => s.dismissAllRemainingForToday);
+  const dismissSingleAlarm = useAlarmStore((s) => s.dismissSingleAlarm);
+  const setActiveRinging = useAlarmStore((s) => s.setActiveRinging);
+  const checkAlarmTriggerTick = useAlarmStore((s) => s.checkAlarmTriggerTick);
 
   useEffect(() => {
-    initializeAlarmNotifications();
+    // Inject Google Web Fonts for instant zero-block rendering on Web
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const fontId = 'alarming-google-fonts';
+      if (!document.getElementById(fontId)) {
+        const link = document.createElement('link');
+        link.id = fontId;
+        link.rel = 'stylesheet';
+        link.href =
+          'https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Outfit:wght@300;400;500;600;700&display=swap';
+        document.head.appendChild(link);
+      }
+    }
+
     initialize();
+    initializeAlarmNotifications();
+
+    // Active in-app alarm ticker running every 5 seconds for foreground/web reliability
+    const tickInterval = setInterval(() => {
+      checkAlarmTriggerTick();
+    }, 5000);
 
     // Listen to notification responses (including lock screen actions)
     let subscription: Notifications.EventSubscription | null = null;
@@ -65,7 +93,8 @@ export default function App() {
             dismissSingleAlarm(alarmId);
           } else if (alarmId) {
             // User tapped notification directly: open ringing overlay
-            const target = alarms.find((a) => a.id === alarmId);
+            const currentAlarms = useAlarmStore.getState().alarms;
+            const target = currentAlarms.find((a) => a.id === alarmId);
             if (target) {
               setActiveRinging({
                 alarm: target,
@@ -84,7 +113,8 @@ export default function App() {
           const data = notification.request.content.data;
           const alarmId = data?.alarmId as string;
           if (alarmId) {
-            const target = alarms.find((a) => a.id === alarmId);
+            const currentAlarms = useAlarmStore.getState().alarms;
+            const target = currentAlarms.find((a) => a.id === alarmId);
             if (target) {
               setActiveRinging({
                 alarm: target,
@@ -99,23 +129,26 @@ export default function App() {
     }
 
     return () => {
+      clearInterval(tickInterval);
       subscription?.remove();
       foregroundSubscription?.remove();
     };
-  }, [alarms]);
+  }, []);
 
-  if (!fontsLoaded) {
+  // On native, wait for fonts; on web, render immediately with CSS fallback fonts
+  if (!fontsLoaded && Platform.OS !== 'web') {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#C9939B" />
+        <ActivityIndicator size="large" color="#AD343E" />
       </View>
     );
   }
 
-  const ActiveScreen = getActiveModule();
-
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider
+      initialMetrics={Platform.OS === 'web' ? WEB_INITIAL_METRICS : undefined}
+      style={styles.safeAreaProvider}
+    >
       <ThemeProvider>
         <View style={styles.webOuter}>
           <View style={styles.webContainer}>
@@ -128,16 +161,24 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  safeAreaProvider: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
   webOuter: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     backgroundColor: '#0A090B',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   webContainer: {
     flex: 1,
     width: '100%',
     maxWidth: 480,
+    height: '100%',
   },
   loadingContainer: {
     flex: 1,

@@ -14,7 +14,7 @@ export interface MiniAppModule {
 export const MiniAppRegistry: MiniAppModule[] = [
   {
     id: 'interval_alarm',
-    name: 'AmourAlarm',
+    name: 'Alarming',
     component: IntervalAlarmScreen,
   },
 ];

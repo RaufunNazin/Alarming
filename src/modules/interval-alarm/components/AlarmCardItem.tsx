@@ -1,12 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Clock, Repeat } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { AlarmItem } from '../types';
 import {
-  formatTime12h,
-  formatRepeatDays,
-  generateIntervalSequence,
+  formatAlarmTimeDisplay,
+  getSmartScheduleString,
 } from '../engine/intervalEngine';
 import { SquircleToggleButton } from './SquircleToggleButton';
 
@@ -23,39 +21,30 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
 }) => {
   const { colors, typography, radii, shadows, spacing } = useTheme();
 
-  const isInterval = alarm.type === 'interval';
-  const timeDisplay = isInterval
-    ? `${formatTime12h(alarm.startHour, alarm.startMinute)} – ${formatTime12h(
-        alarm.endHour ?? alarm.startHour,
-        alarm.endMinute ?? alarm.startMinute
-      )}`
-    : formatTime12h(alarm.startHour, alarm.startMinute);
-
-  const stepsCount = isInterval
-    ? generateIntervalSequence(
-        alarm.startHour,
-        alarm.startMinute,
-        alarm.endHour ?? alarm.startHour,
-        alarm.endMinute ?? alarm.startMinute,
-        alarm.intervalMinutes ?? 10
-      ).length
-    : 1;
-
-  const repeatStr = formatRepeatDays(alarm.repeatDays);
+  const scheduleStr = getSmartScheduleString(alarm);
+  const timeDisplay = formatAlarmTimeDisplay(alarm);
+  const defaultLabel =
+    alarm.type === 'interval'
+      ? 'Morning Wakeup'
+      : alarm.type === 'offset'
+      ? 'Interval Wakeup'
+      : 'Alarm';
+  const labelDisplay = alarm.label.trim() || defaultLabel;
 
   return (
-    <View style={{ marginHorizontal: spacing.lg, marginVertical: 5 }}>
-      {/* Sibling container: Cleanly separates card editing tap from squircle toggle tap */}
+    <View style={{ marginHorizontal: spacing.lg, marginVertical: 6 }}>
+      {/* Sibling touchable container: card editing on the left, squircle toggle on the right */}
       <View
         style={[
           styles.cardContainer,
           shadows.card,
           {
-            backgroundColor: colors.surface,
-            borderColor: colors.surfaceBorder,
+            backgroundColor: alarm.isEnabled ? colors.cardOnBg : colors.cardOffBg,
+            borderColor: alarm.isEnabled ? colors.cardOnBorder : colors.cardOffBorder,
             borderRadius: radii.cardOuter,
-            padding: spacing.md,
-            opacity: alarm.isEnabled ? 1 : 0.65,
+            paddingVertical: 18,
+            paddingHorizontal: 18,
+            opacity: alarm.isEnabled ? 1 : 0.6,
           },
         ]}
       >
@@ -66,88 +55,61 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = ({
             onPress={onPressCard}
             style={styles.infoColPressable}
           >
-            <Text
-              style={[
-                styles.timeText,
-                {
-                  color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
-                  fontFamily: typography.numbersBold,
-                  fontSize: isInterval ? 22 : 30,
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {timeDisplay}
-            </Text>
-
-            <Text
-              style={[
-                styles.label,
-                {
-                  color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
-                  fontFamily: typography.cursive,
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {alarm.label || (isInterval ? 'Morning Wakeup' : 'Alarm')}
-            </Text>
-
-            <View style={styles.metaRow}>
-              {isInterval && (
-                <View
-                  style={[
-                    styles.metaChip,
-                    {
-                      backgroundColor: colors.surfaceSubtle,
-                      borderColor: colors.surfaceBorder,
-                      borderRadius: radii.chip,
-                    },
-                  ]}
-                >
-                  <Clock
-                    size={11}
-                    color={alarm.isEnabled ? colors.primary : colors.textMuted}
-                    strokeWidth={2}
-                  />
-                  <Text
-                    style={[
-                      styles.metaChipText,
-                      {
-                        color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
-                        fontFamily: typography.numbersRegular,
-                      },
-                    ]}
-                  >
-                    Every {alarm.intervalMinutes}m • {stepsCount} alarms
-                  </Text>
-                </View>
-              )}
-
-              <View
+            {/* Top row: Today/Tomorrow / Sun-Thu • Label (wraps if long) */}
+            <View style={styles.topInfoRow}>
+              <Text
                 style={[
-                  styles.metaChip,
+                  styles.scheduleText,
                   {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.chip,
+                    color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
+                    fontFamily: typography.numbersBold,
                   },
                 ]}
               >
-                <Repeat size={11} color={colors.textMuted} strokeWidth={2} />
-                <Text
-                  style={[
-                    styles.metaChipText,
-                    { color: colors.textMuted, fontFamily: typography.numbersRegular },
-                  ]}
-                >
-                  {repeatStr}
-                </Text>
-              </View>
+                {scheduleStr}
+              </Text>
+              <Text
+                style={[
+                  styles.separatorDot,
+                  { color: colors.textMuted },
+                ]}
+              >
+                •
+              </Text>
+              <Text
+                style={[
+                  styles.labelText,
+                  {
+                    color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
+                    fontFamily: typography.numbersRegular,
+                  },
+                ]}
+                numberOfLines={2}
+              >
+                {labelDisplay}
+              </Text>
             </View>
+
+            {/* Time Display (Uniform sizing across all alarm types) */}
+            <Text
+              style={[
+                styles.largeTimeText,
+                {
+                  fontSize: 22,
+                  lineHeight: 28,
+                  color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
+                  fontFamily: typography.numbersBold,
+                },
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+            >
+              {timeDisplay}
+            </Text>
           </TouchableOpacity>
 
-          {/* Right Sibling: Squircle Toggle Button (No awkward delete button below!) */}
+          {/* Right Sibling: Squircle Toggle Button */}
           <View style={styles.toggleWrapper}>
             <SquircleToggleButton isEnabled={alarm.isEnabled} onToggle={onToggle} />
           </View>
@@ -168,35 +130,31 @@ const styles = StyleSheet.create({
   },
   infoColPressable: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: 14,
   },
-  timeText: {
-    lineHeight: 34,
-    marginBottom: 2,
-  },
-  label: {
-    fontSize: 20,
-    marginBottom: 6,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  metaChip: {
+  topInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderWidth: 1,
+    flexWrap: 'wrap',
+    marginBottom: 4,
   },
-  metaChipText: {
-    fontSize: 11,
+  scheduleText: {
+    fontSize: 13,
+    letterSpacing: 0.2,
+  },
+  separatorDot: {
+    marginHorizontal: 6,
+    fontSize: 13,
+  },
+  labelText: {
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  largeTimeText: {
+    letterSpacing: 0.2,
   },
   toggleWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingLeft: 4,
   },
 });
