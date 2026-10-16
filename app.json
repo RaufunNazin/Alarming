@@ -40,6 +40,11 @@
         }
       ],
       "./plugins/withAndroidAlarmChannel.js"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b58ba867-f34a-4365-9e0a-c267f4911750"
+      }
+    }
   }
 }
