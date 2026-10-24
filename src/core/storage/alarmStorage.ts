@@ -10,6 +10,8 @@ const LEGACY_GREETING_STORAGE_KEY = '@amour_love_note_greeting_v1';
 const LAST_SELECTED_TYPE_KEY = '@alarming_last_selected_alarm_type_v1';
 const LEGACY_LAST_SELECTED_TYPE_KEY = '@amour_last_selected_alarm_type_v1';
 
+const SETTINGS_STORAGE_KEY = '@alarming_settings_v1';
+
 export const AlarmStorage = {
   async getAlarms(): Promise<AlarmItem[]> {
     try {
@@ -81,6 +83,26 @@ export const AlarmStorage = {
       await AsyncStorage.setItem(GREETING_STORAGE_KEY, note);
     } catch (e) {
       console.warn('Error saving greeting:', e);
+    }
+  },
+
+  async getSettings<T extends Record<string, unknown>>(): Promise<Partial<T> | null> {
+    try {
+      const raw = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (raw) {
+        return JSON.parse(raw) as Partial<T>;
+      }
+    } catch (e) {
+      console.warn('Error reading settings from storage:', e);
+    }
+    return null;
+  },
+
+  async saveSettings<T extends Record<string, unknown>>(settings: T): Promise<void> {
+    try {
+      await AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch (e) {
+      console.warn('Error saving settings to storage:', e);
     }
   },
 };

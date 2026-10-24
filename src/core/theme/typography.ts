@@ -33,6 +33,20 @@ export const Typography = {
     default: 'Outfit_300Light',
   }),
 
+  // Semantic sans aliases
+  sansBold: Platform.select({
+    web: 'Outfit, "Outfit_700Bold", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_700Bold',
+  }),
+  sansMedium: Platform.select({
+    web: 'Outfit, "Outfit_600SemiBold", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_600SemiBold',
+  }),
+  sansRegular: Platform.select({
+    web: 'Outfit, "Outfit_400Regular", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    default: 'Outfit_400Regular',
+  }),
+
   // Font sizes
   sizes: {
     heroClock: 64,

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform, AppState } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Caveat_400Regular,
@@ -16,6 +16,7 @@ import {
 import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from './src/core/theme';
+import { useSettingsStore } from './src/core/settings/settingsStore';
 import { getActiveModule } from './src/modules/registry';
 import { useAlarmStore } from './src/modules/interval-alarm/store/alarmStore';
 import {
@@ -25,6 +26,7 @@ import {
   ACTION_SNOOZE_NEXT,
   ACTION_SNOOZE_SINGLE,
 } from './src/core/notifications/alarmNotifier';
+import { alarmSoundPlayer } from './src/core/audio/alarmSoundPlayer';
 
 const WEB_INITIAL_METRICS = {
   insets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -53,10 +55,13 @@ export default function App() {
   const initialize = useAlarmStore((s) => s.initialize);
   const dismissAllRemainingForToday = useAlarmStore((s) => s.dismissAllRemainingForToday);
   const dismissSingleAlarm = useAlarmStore((s) => s.dismissSingleAlarm);
-  const setActiveRinging = useAlarmStore((s) => s.setActiveRinging);
+  const triggerFromNotification = useAlarmStore((s) => s.triggerFromNotification);
   const checkAlarmTriggerTick = useAlarmStore((s) => s.checkAlarmTriggerTick);
+  const themeMode = useSettingsStore((s) => s.themeMode);
 
   useEffect(() => {
+    void useSettingsStore.getState().loadSettings();
+
     // Inject Google Web Fonts for instant zero-block rendering on Web
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const fontId = 'alarming-google-fonts';
@@ -70,17 +75,46 @@ export default function App() {
       }
     }
 
-    initialize();
-    initializeAlarmNotifications();
+    const initPromise = initialize();
+    void initializeAlarmNotifications();
 
-    // Active in-app alarm ticker running every 5 seconds for foreground/web reliability
+    const syncPresentedOrDueAlarms = async () => {
+      checkAlarmTriggerTick();
+      if (Platform.OS === 'web' || useAlarmStore.getState().activeRinging) {
+        return;
+      }
+      try {
+        const presented = await Notifications.getPresentedNotificationsAsync();
+        for (const notif of presented) {
+          const data = notif.request?.content?.data;
+          const alarmId = data?.alarmId as string | undefined;
+          if (alarmId) {
+            triggerFromNotification({
+              alarmId,
+              stepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : undefined,
+              totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
+              timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
+              cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+            });
+            break;
+          }
+        }
+      } catch {}
+    };
+
+    // Active in-app alarm ticker running every 2 seconds for foreground/web reliability
     const tickInterval = setInterval(() => {
       checkAlarmTriggerTick();
-    }, 5000);
+    }, 2000);
 
     // Listen to notification responses (including lock screen actions)
     let subscription: Notifications.EventSubscription | null = null;
     let foregroundSubscription: Notifications.EventSubscription | null = null;
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void syncPresentedOrDueAlarms();
+      }
+    });
 
     const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
       const actionIdentifier = response.actionIdentifier;
@@ -91,37 +125,44 @@ export default function App() {
         (actionIdentifier === ACTION_SNOOZE_NEXT || actionIdentifier === ACTION_SNOOZE_SINGLE) &&
         alarmId
       ) {
+        alarmSoundPlayer.finishLockScreenAlarmIfLocked();
         const currentAlarms = useAlarmStore.getState().alarms;
         const target = currentAlarms.find((a) => a.id === alarmId);
-        const snoozeDuration = target?.intervalMinutes || 10;
-        useAlarmStore.getState().snoozeAlarm(alarmId, snoozeDuration);
+        const defaultSnooze = useSettingsStore.getState().defaultSnoozeMinutes || 10;
+        const snoozeDuration =
+          target && target.type !== 'single' && !target.isEscalating
+            ? target.intervalMinutes || defaultSnooze
+            : defaultSnooze;
+        void useAlarmStore.getState().snoozeAlarm(alarmId, snoozeDuration);
       } else if (actionIdentifier === ACTION_DISMISS_ALL && alarmId) {
-        dismissAllRemainingForToday(alarmId);
+        alarmSoundPlayer.finishLockScreenAlarmIfLocked();
+        void dismissAllRemainingForToday(alarmId);
       } else if (actionIdentifier === ACTION_DISMISS_SINGLE && alarmId) {
-        dismissSingleAlarm(alarmId);
+        alarmSoundPlayer.finishLockScreenAlarmIfLocked();
+        void dismissSingleAlarm(alarmId);
       } else if (alarmId) {
-        // User tapped notification directly: open ringing overlay
-        const currentAlarms = useAlarmStore.getState().alarms;
-        const target = currentAlarms.find((a) => a.id === alarmId);
-        if (target) {
-          setActiveRinging({
-            alarm: target,
-            currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
-            totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
-            currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
-          });
-        }
+        // User tapped notification directly: open ringing overlay and record deduplication key
+        triggerFromNotification({
+          alarmId,
+          stepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : undefined,
+          totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
+          timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
+          cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+        });
       }
     };
 
     if (Platform.OS !== 'web') {
       subscription = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
 
-      // Handle cold start launch from tapping a notification
-      Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
-        if (lastResponse) {
-          handleNotificationResponse(lastResponse);
-        }
+      // Handle cold start launch from tapping a notification or fullScreenIntent wakeup after alarms have loaded
+      void initPromise.then(() => {
+        void syncPresentedOrDueAlarms();
+        Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
+          if (lastResponse) {
+            handleNotificationResponse(lastResponse);
+          }
+        });
       });
 
       // Listen to incoming foreground notifications
@@ -130,16 +171,13 @@ export default function App() {
           const data = notification.request.content.data;
           const alarmId = data?.alarmId as string;
           if (alarmId) {
-            const currentAlarms = useAlarmStore.getState().alarms;
-            const target = currentAlarms.find((a) => a.id === alarmId);
-            if (target) {
-              setActiveRinging({
-                alarm: target,
-                currentStepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : 0,
-                totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : 1,
-                currentTimeString: typeof data?.timeString === 'string' ? data.timeString : '06:30 AM',
-              });
-            }
+            triggerFromNotification({
+              alarmId,
+              stepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : undefined,
+              totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
+              timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
+              cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+            });
           }
         }
       );
@@ -149,8 +187,15 @@ export default function App() {
       clearInterval(tickInterval);
       subscription?.remove();
       foregroundSubscription?.remove();
+      appStateSubscription.remove();
     };
-  }, []);
+  }, [
+    initialize,
+    dismissAllRemainingForToday,
+    dismissSingleAlarm,
+    triggerFromNotification,
+    checkAlarmTriggerTick,
+  ]);
 
   // On native, wait for fonts; on web, render immediately with CSS fallback fonts
   if (!fontsLoaded && Platform.OS !== 'web') {
@@ -167,7 +212,12 @@ export default function App() {
       style={styles.safeAreaProvider}
     >
       <ThemeProvider>
-        <View style={styles.webOuter}>
+        <View
+          style={[
+            styles.webOuter,
+            themeMode === 'light' && { backgroundColor: '#F5F6F9' },
+          ]}
+        >
           <View style={styles.webContainer}>
             <ActiveScreen />
           </View>

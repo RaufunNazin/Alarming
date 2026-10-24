@@ -1,7 +1,14 @@
-import { Platform, NativeModules } from 'react-native';
+import { Platform, NativeModules, DeviceEventEmitter } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
 const { AlarmSound } = NativeModules;
+
+export interface DeviceSafetyStatus {
+  batteryLevel: number;
+  isCharging: boolean;
+  alarmVolumePercent: number;
+  canUseFullScreenIntent: boolean;
+}
 
 /**
  * Universal Alarm Sound Engine & Synthesizer
@@ -154,6 +161,123 @@ class AlarmSoundEngine {
       clearInterval(this.loopInterval);
       this.loopInterval = null;
     }
+  }
+
+  /**
+   * Stops the alarm sound and, if the device keyguard is currently locked,
+   * returns the phone to the lock screen so the app isn't left open over the keyguard.
+   */
+  public finishLockScreenAlarmIfLocked(): void {
+    this.stopAlarmSound();
+    if (Platform.OS === 'android') {
+      try {
+        AlarmSound?.finishLockScreenAlarmIfLocked?.();
+      } catch (e) {
+        console.warn('Could not finish lock screen alarm:', e);
+      }
+    }
+  }
+
+  /**
+   * Checks whether Android 14+ full-screen intent permission is granted.
+   */
+  public async canUseFullScreenIntent(): Promise<boolean> {
+    if (Platform.OS !== 'android' || !AlarmSound?.canUseFullScreenIntent) {
+      return true;
+    }
+    try {
+      return await AlarmSound.canUseFullScreenIntent();
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Opens Android 14+ system settings to grant full-screen intent permission.
+   */
+  public openFullScreenIntentSettings(): void {
+    if (Platform.OS === 'android') {
+      try {
+        AlarmSound?.openFullScreenIntentSettings?.();
+      } catch (e) {
+        console.warn('Could not open full screen intent settings:', e);
+      }
+    }
+  }
+
+  /**
+   * Queries device battery level, charging state, alarm stream volume %, and full-screen intent permission.
+   */
+  public async getDeviceSafetyStatus(): Promise<DeviceSafetyStatus> {
+    if (Platform.OS === 'android' && AlarmSound?.getDeviceSafetyStatus) {
+      try {
+        const res = await AlarmSound.getDeviceSafetyStatus();
+        return {
+          batteryLevel: typeof res?.batteryLevel === 'number' ? res.batteryLevel : 100,
+          isCharging: Boolean(res?.isCharging ?? true),
+          alarmVolumePercent:
+            typeof res?.alarmVolumePercent === 'number' ? res.alarmVolumePercent : 100,
+          canUseFullScreenIntent: Boolean(res?.canUseFullScreenIntent ?? true),
+        };
+      } catch {
+        // Fallback below
+      }
+    }
+
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+      try {
+        const battery = await (
+          navigator as Navigator & {
+            getBattery: () => Promise<{ level: number; charging: boolean }>;
+          }
+        ).getBattery();
+        return {
+          batteryLevel: Math.round((battery.level ?? 1) * 100),
+          isCharging: Boolean(battery.charging),
+          alarmVolumePercent: this.isMuted ? 0 : 100,
+          canUseFullScreenIntent: true,
+        };
+      } catch {
+        // Fallback below
+      }
+    }
+
+    return {
+      batteryLevel: 100,
+      isCharging: true,
+      alarmVolumePercent: this.isMuted ? 0 : 100,
+      canUseFullScreenIntent: true,
+    };
+  }
+
+  /**
+   * Subscribes to hardware volume up/down button presses while an alarm is ringing.
+   */
+  public addHardwareVolumeListener(callback: () => void): () => void {
+    if (Platform.OS === 'android') {
+      const sub = DeviceEventEmitter.addListener('onHardwareVolumeButtonPressed', () => {
+        callback();
+      });
+      return () => sub.remove();
+    }
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handler = (e: KeyboardEvent) => {
+        if (
+          e.key === 'AudioVolumeUp' ||
+          e.key === 'AudioVolumeDown' ||
+          e.key === 'VolumeUp' ||
+          e.key === 'VolumeDown'
+        ) {
+          e.preventDefault();
+          callback();
+        }
+      };
+      window.addEventListener('keydown', handler);
+      return () => window.removeEventListener('keydown', handler);
+    }
+
+    return () => {};
   }
 
   /**

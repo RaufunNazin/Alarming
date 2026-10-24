@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { darkTheme, ThemeColors } from './colors';
+import { darkTheme, lightTheme, ThemeColors } from './colors';
 import { Typography } from './typography';
 import { Radii } from './radii';
-import { Shadows } from './shadows';
+import { DarkShadows, LightShadows, Shadows } from './shadows';
 import { Spacing } from './spacing';
+import { ThemeMode, useSettingsStore } from '../settings/settingsStore';
 
 export interface ThemeContextValue {
   colors: ThemeColors;
@@ -11,14 +12,14 @@ export interface ThemeContextValue {
   radii: typeof Radii;
   shadows: typeof Shadows;
   spacing: typeof Spacing;
-  themeMode: 'dark';
+  themeMode: ThemeMode;
 }
 
 const defaultContextValue: ThemeContextValue = {
   colors: darkTheme,
   typography: Typography,
   radii: Radii,
-  shadows: Shadows,
+  shadows: DarkShadows,
   spacing: Spacing,
   themeMode: 'dark',
 };
@@ -26,16 +27,18 @@ const defaultContextValue: ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue>(defaultContextValue);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const themeMode = useSettingsStore((state) => state.themeMode);
+
   const value = useMemo(
     () => ({
-      colors: darkTheme,
+      colors: themeMode === 'light' ? lightTheme : darkTheme,
       typography: Typography,
       radii: Radii,
-      shadows: Shadows,
+      shadows: themeMode === 'light' ? LightShadows : DarkShadows,
       spacing: Spacing,
-      themeMode: 'dark' as const,
+      themeMode,
     }),
-    []
+    [themeMode]
   );
 
   return (

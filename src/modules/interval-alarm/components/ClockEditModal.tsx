@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -8,10 +8,13 @@ import {
   ScrollView,
   Pressable,
 } from 'react-native';
+import { Clock, Keyboard } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
+import { useTranslation } from '../../../core/i18n/translations';
 import { AlarmType } from '../types';
 import { GoogleRadialClock } from './GoogleRadialClock';
-import { formatTime12h } from '../engine/intervalEngine';
+import { getLiveDialParts } from '../engine/intervalEngine';
+import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface ClockEditModalProps {
   visible: boolean;
@@ -32,12 +35,6 @@ interface ClockEditModalProps {
   }) => void;
 }
 
-const ALARM_TABS: { key: AlarmType; label: string }[] = [
-  { key: 'single', label: 'Single' },
-  { key: 'interval', label: 'Window' },
-  { key: 'offset', label: 'Offset' },
-];
-
 export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   visible,
   initialType,
@@ -49,10 +46,19 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   onClose,
   onConfirm,
 }) => {
-  const { colors, typography, radii, shadows } = useTheme();
+  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { t, formatTime12h: formatTime12hLocal } = useTranslation();
+
+  const alarmTabs: { key: AlarmType; label: string }[] = [
+    { key: 'single', label: t.modeSingle },
+    { key: 'interval', label: t.modeWindow },
+    { key: 'offset', label: t.modeOffset },
+  ];
 
   const [alarmType, setAlarmType] = useState<AlarmType>(initialType);
   const [activeTimeTab, setActiveTimeTab] = useState<'start' | 'end'>('start');
+  const [dialResetKey, setDialResetKey] = useState(0);
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false);
   const [startHour, setStartHour] = useState(initialStartHour);
   const [startMinute, setStartMinute] = useState(initialStartMinute);
   const [endHour, setEndHour] = useState(initialEndHour);
@@ -65,6 +71,8 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
     if (visible) {
       setAlarmType(initialType);
       setActiveTimeTab('start');
+      setDialResetKey((k) => k + 1);
+      setIsKeyboardMode(false);
       setStartHour(initialStartHour);
       setStartMinute(initialStartMinute);
       setEndHour(initialEndHour);
@@ -72,6 +80,12 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
       setOffsetDirection(initialOffsetDirection);
     }
   }
+
+  const handleSelectTimeTab = (tab: 'start' | 'end') => {
+    safeHaptics.selectionAsync();
+    setActiveTimeTab(tab);
+    setDialResetKey((k) => k + 1);
+  };
 
   const handleTimeChange = (hour: number, minute: number) => {
     if (alarmType === 'interval' && activeTimeTab === 'end') {
@@ -84,6 +98,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   };
 
   const handleSave = () => {
+    safeHaptics.selectionAsync();
     onConfirm({
       type: alarmType,
       startHour,
@@ -98,6 +113,28 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
     alarmType === 'interval' && activeTimeTab === 'end' ? endHour : startHour;
   const currentDialMinute =
     alarmType === 'interval' && activeTimeTab === 'end' ? endMinute : startMinute;
+
+  const liveRingParts = useMemo(() => {
+    if (!visible) return undefined;
+    return getLiveDialParts({
+      type: alarmType,
+      startHour,
+      startMinute,
+      endHour,
+      endMinute,
+      offsetDirection,
+    });
+  }, [
+    visible,
+    alarmType,
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    offsetDirection,
+  ]);
+
+  if (!visible) return null;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -122,7 +159,15 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
           onStartShouldSetResponder={() => true}
         >
           {/* Drag Handle */}
-          <View style={styles.handleBar} />
+          <View
+            style={[
+              styles.handleBar,
+              {
+                backgroundColor:
+                  themeMode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : colors.surfaceBorder,
+              },
+            ]}
+          />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -139,7 +184,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                 },
               ]}
             >
-              {ALARM_TABS.map((tab) => {
+              {alarmTabs.map((tab) => {
                 const isSelected = alarmType === tab.key;
                 return (
                   <TouchableOpacity
@@ -148,6 +193,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                     onPress={() => {
                       setAlarmType(tab.key);
                       setActiveTimeTab('start');
+                      setDialResetKey((k) => k + 1);
                     }}
                     style={[
                       styles.typeSegment,
@@ -178,6 +224,9 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
               selectedHour={currentDialHour}
               selectedMinute={currentDialMinute}
               onTimeChange={handleTimeChange}
+              resetKey={dialResetKey}
+              isKeyboardMode={isKeyboardMode}
+              liveDurationParts={liveRingParts}
             />
 
             {/* Mode-Specific Controls Below Clock */}
@@ -186,7 +235,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                 <View style={styles.intervalCardRow}>
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => setActiveTimeTab('start')}
+                    onPress={() => handleSelectTimeTab('start')}
                     style={[
                       styles.timeSelectorCard,
                       {
@@ -204,7 +253,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         { color: colors.textSecondary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      START TIME
+                      {t.startTime.toUpperCase()}
                     </Text>
                     <Text
                       style={[
@@ -212,13 +261,13 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         { color: colors.textPrimary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      {formatTime12h(startHour, startMinute)}
+                      {formatTime12hLocal(startHour, startMinute).full}
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => setActiveTimeTab('end')}
+                    onPress={() => handleSelectTimeTab('end')}
                     style={[
                       styles.timeSelectorCard,
                       {
@@ -236,7 +285,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         { color: colors.textSecondary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      END TIME
+                      {t.endTime.toUpperCase()}
                     </Text>
                     <Text
                       style={[
@@ -244,7 +293,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         { color: colors.textPrimary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      {formatTime12h(endHour, endMinute)}
+                      {formatTime12hLocal(endHour, endMinute).full}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -283,7 +332,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         },
                       ]}
                     >
-                      Ring Before Target
+                      {t.before}
                     </Text>
                   </TouchableOpacity>
 
@@ -307,7 +356,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                         },
                       ]}
                     >
-                      Ring After Target
+                      {t.after}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -326,6 +375,29 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             ]}
           >
             <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                safeHaptics.selectionAsync();
+                setIsKeyboardMode((v) => !v);
+              }}
+              accessibilityLabel={isKeyboardMode ? t.useDialTooltip : t.useKeyboardTooltip}
+              style={[
+                styles.bottomKeypadBtn,
+                {
+                  backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
+                  borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
+                  borderRadius: radii.buttonMedium,
+                },
+              ]}
+            >
+              {isKeyboardMode ? (
+                <Clock size={20} color={colors.primary} />
+              ) : (
+                <Keyboard size={20} color={colors.textSecondary} />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
               activeOpacity={0.7}
               onPress={onClose}
               style={[
@@ -343,7 +415,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                   { color: colors.textSecondary, fontFamily: typography.numbersBold },
                 ]}
               >
-                Cancel
+                {t.cancel}
               </Text>
             </TouchableOpacity>
 
@@ -364,7 +436,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                   { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
                 ]}
               >
-                Set Time
+                {t.selectTime}
               </Text>
             </TouchableOpacity>
           </View>
@@ -390,7 +462,6 @@ const styles = StyleSheet.create({
   handleBar: {
     width: 40,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 16,
@@ -455,15 +526,22 @@ const styles = StyleSheet.create({
   bottomActionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 24,
     borderTopWidth: 1,
   },
+  bottomKeypadBtn: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   bottomCancelBtn: {
     flex: 1,
-    paddingVertical: 14,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -472,8 +550,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   bottomSaveBtn: {
-    flex: 1.8,
-    paddingVertical: 14,
+    flex: 1.5,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },

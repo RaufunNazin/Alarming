@@ -9,6 +9,7 @@ export interface ThemeColors {
   surfaceHero: string;
   surfaceElevated: string;
   surfaceSubtle: string;
+  modalSurface: string;
   surfaceBorder: string;
   surfaceBorderHighlight: string;
 
@@ -29,6 +30,7 @@ export interface ThemeColors {
   primaryDark: string;
   primaryMuted: string;
   accent: string;
+  accentSoft: string;
   accentGold: string;
   success: string;
   danger: string;
@@ -60,7 +62,7 @@ export interface ThemeColors {
   overlaySecondaryText: string;
 }
 
-// 1. PURE DARK MODE (Dark + White + Crimson Accent) - Zero Beige
+// 1. PURE DARK MODE (Dark + White + Crimson Accent) - Untouched
 export const darkTheme: ThemeColors = {
   canvasGradientStart: '#0F0F11',
   canvasGradientEnd: '#141417',
@@ -70,6 +72,7 @@ export const darkTheme: ThemeColors = {
   surfaceHero: '#202024',
   surfaceElevated: '#18181B',
   surfaceSubtle: '#27272B',
+  modalSurface: '#18181B',
   surfaceBorder: 'rgba(255, 255, 255, 0.08)',
   surfaceBorderHighlight: 'rgba(255, 255, 255, 0.16)',
 
@@ -89,6 +92,7 @@ export const darkTheme: ThemeColors = {
   primaryDark: '#8C2730',
   primaryMuted: 'rgba(173, 52, 62, 0.18)',
   accent: '#AD343E',
+  accentSoft: 'rgba(173, 52, 62, 0.16)',
   accentGold: '#C94D58',
   success: '#4c956c',
   danger: '#dc6040',
@@ -109,12 +113,72 @@ export const darkTheme: ThemeColors = {
   amPmActiveText: '#FFFFFF',
   amPmInactiveText: '#A1A1AA',
 
-  overlayBackdrop: 'rgba(15, 15, 17, 0.98)',
+  overlayBackdrop: 'rgba(10, 10, 14, 0.72)',
   overlayPrimaryBg: '#FFFFFF',
   overlayPrimaryText: '#0F0F11',
   overlaySecondaryBorder: 'rgba(255, 255, 255, 0.12)',
   overlaySecondaryBg: '#18181B',
   overlaySecondaryText: '#A1A1AA',
+};
+
+// 2. REFINED LIGHT MODE (Crisp White Cards + Soft Alabaster Canvas + Translucent Dark Backdrop)
+export const lightTheme: ThemeColors = {
+  canvasGradientStart: '#F7F7FA',
+  canvasGradientEnd: '#F2F3F7',
+  background: '#F5F6F9',
+
+  surface: '#FFFFFF',
+  surfaceHero: '#FFFFFF',
+  surfaceElevated: '#FFFFFF',
+  surfaceSubtle: '#F2F3F7',
+  modalSurface: '#FFFFFF',
+  surfaceBorder: 'rgba(17, 24, 39, 0.07)',
+  surfaceBorderHighlight: 'rgba(17, 24, 39, 0.14)',
+
+  // Card On / Off distinction for Light Mode
+  cardOnBg: '#FFFFFF',
+  cardOnBorder: 'rgba(17, 24, 39, 0.08)',
+  cardOffBg: '#FAFBFD',
+  cardOffBorder: 'rgba(17, 24, 39, 0.04)',
+
+  textPrimary: '#111827',
+  textSecondary: '#4B5563',
+  textMuted: '#9CA3AF',
+  textOnPrimary: '#FFFFFF',
+
+  primary: '#AD343E',
+  primaryLight: '#B83B46',
+  primaryDark: '#8C2730',
+  primaryMuted: 'rgba(173, 52, 62, 0.10)',
+  accent: '#AD343E',
+  accentSoft: 'rgba(173, 52, 62, 0.10)',
+  accentGold: '#AD343E',
+  success: '#2E7D52',
+  danger: '#D04A30',
+
+  squircleOnBg: '#AD343E',
+  squircleOffBg: '#F2F3F7',
+  squircleBorder: 'rgba(17, 24, 39, 0.07)',
+  squircleBorderOn: '#8C2730',
+  squircleIconOn: '#FFFFFF',
+  squircleIconOff: '#9CA3AF',
+
+  dialFaceBg: '#F2F3F7',
+  dialHandColor: '#AD343E',
+  dialCenterDot: '#AD343E',
+  dialNumberActive: '#FFFFFF',
+  dialNumberInactive: '#374151',
+  amPmActiveBg: 'rgba(173, 52, 62, 0.14)',
+  amPmActiveText: '#AD343E',
+  amPmInactiveText: '#6B7280',
+
+  // Never use a white/light overlay in light mode — use a soft translucent dark dim
+  overlayBackdrop: 'rgba(15, 18, 28, 0.42)',
+  overlayPrimaryBg: '#111827',
+  overlayPrimaryText: '#FFFFFF',
+  overlaySecondaryBorder: 'rgba(17, 24, 39, 0.10)',
+  overlaySecondaryBg: '#FFFFFF',
+  overlaySecondaryText: '#4B5563',
 };
 
 export const theme: ThemeColors = darkTheme;

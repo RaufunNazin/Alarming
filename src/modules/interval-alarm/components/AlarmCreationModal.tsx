@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -8,16 +8,19 @@ import {
   ScrollView,
   Pressable,
 } from 'react-native';
+import { Minus, Plus, Flame, Clock, Tag, Keyboard } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
+import { useSettingsStore } from '../../../core/settings/settingsStore';
+import { useTranslation } from '../../../core/i18n/translations';
 import { AlarmItem, AlarmType } from '../types';
 import { GoogleRadialClock } from './GoogleRadialClock';
 import {
-  formatTime12h,
   getNextHourTime,
-  generateIntervalSequence,
-  generateOffsetSequence,
+  getBaseAlarmSteps,
+  getLiveDialParts,
 } from '../engine/intervalEngine';
 import { useAlarmStore } from '../store/alarmStore';
+import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface AlarmCreationModalProps {
   visible: boolean;
@@ -25,23 +28,33 @@ interface AlarmCreationModalProps {
   onSave: (alarmData: Omit<AlarmItem, 'id'>) => void;
 }
 
-const ALARM_TABS: { key: AlarmType; label: string }[] = [
-  { key: 'single', label: 'Single' },
-  { key: 'interval', label: 'Window' },
-  { key: 'offset', label: 'Offset' },
-];
-
 export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   visible,
   onClose,
   onSave,
 }) => {
-  const { colors, typography, radii, shadows } = useTheme();
+  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { t, formatTime12h: formatTime12hLocal } = useTranslation();
   const lastSelectedType = useAlarmStore((s) => s.lastSelectedType);
   const setLastSelectedType = useAlarmStore((s) => s.setLastSelectedType);
 
+  const intervalModeType = useSettingsStore((s) => s.intervalModeType);
+  const showCreationAdvancedControls = useSettingsStore(
+    (s) => s.showCreationAdvancedControls
+  );
+  const categories = useSettingsStore((s) => s.categories);
+  const isEscalatingMode = intervalModeType === 'escalating';
+
+  const alarmTabs: { key: AlarmType; label: string }[] = [
+    { key: 'single', label: t.modeSingle },
+    { key: 'interval', label: t.modeWindow },
+    { key: 'offset', label: t.modeOffset },
+  ];
+
   const [alarmType, setAlarmType] = useState<AlarmType>(lastSelectedType || 'single');
   const [activeTimeTab, setActiveTimeTab] = useState<'start' | 'end'>('start');
+  const [dialResetKey, setDialResetKey] = useState(0);
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false);
   const [startHour, setStartHour] = useState(12);
   const [startMinute, setStartMinute] = useState(0);
   const [endHour, setEndHour] = useState(13);
@@ -49,63 +62,108 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   const [offsetDirection, setOffsetDirection] = useState<'before' | 'after'>('before');
   const [alarmCount, setAlarmCount] = useState(10);
   const [intervalMinutes, setIntervalMinutes] = useState(10);
+  const [category, setCategory] = useState<string | undefined>(undefined);
 
-  // When opened, reset to next-hour defaults and last selected type
+  // When opened, reset to next-hour defaults + user settings defaults and last selected type
   useEffect(() => {
     if (visible) {
       const next = getNextHourTime();
       const currentType = useAlarmStore.getState().lastSelectedType || 'single';
+      const settings = useSettingsStore.getState();
+      const windowSpan = settings.defaultWindowDurationMinutes || 60;
+      const startTotal = next.hour * 60 + next.minute;
+      const endTotal = (startTotal + windowSpan) % (24 * 60);
+
       setAlarmType(currentType);
       setActiveTimeTab('start');
+      setDialResetKey((k) => k + 1);
+      setIsKeyboardMode(false);
       setStartHour(next.hour);
       setStartMinute(next.minute);
-      setEndHour((next.hour + 1) % 24);
-      setEndMinute(next.minute);
-      setOffsetDirection('before');
-      setAlarmCount(10);
-      setIntervalMinutes(10);
+      setEndHour(Math.floor(endTotal / 60));
+      setEndMinute(endTotal % 60);
+      setOffsetDirection(settings.defaultOffsetDirection || 'before');
+      setAlarmCount(settings.defaultAlarmCount || 10);
+      setIntervalMinutes(settings.defaultIntervalMinutes || 10);
+      setCategory(undefined);
     }
   }, [visible]);
 
   const handleSelectType = (type: AlarmType) => {
     setAlarmType(type);
     setActiveTimeTab('start');
+    setDialResetKey((k) => k + 1);
     if (!intervalMinutes) {
       setIntervalMinutes(10);
     }
     setLastSelectedType(type);
   };
 
+  const handleSelectTimeTab = (tab: 'start' | 'end') => {
+    setActiveTimeTab(tab);
+    setDialResetKey((k) => k + 1);
+  };
+
   const handleTimeChange = (hour: number, minute: number) => {
+    let nextStartH = startHour;
+    let nextStartM = startMinute;
+    let nextEndH = endHour;
+    let nextEndM = endMinute;
+
     if (alarmType === 'interval' && activeTimeTab === 'end') {
+      nextEndH = hour;
+      nextEndM = minute;
       setEndHour(hour);
       setEndMinute(minute);
     } else {
+      nextStartH = hour;
+      nextStartM = minute;
       setStartHour(hour);
       setStartMinute(minute);
     }
-  };
-
-  const handleSave = () => {
-    let generatedSequence: string[] | undefined;
 
     if (alarmType === 'interval') {
-      generatedSequence = generateIntervalSequence(
-        startHour,
-        startMinute,
-        endHour,
-        endMinute,
-        intervalMinutes
-      ).map((s) => s.timeString);
-    } else if (alarmType === 'offset') {
-      generatedSequence = generateOffsetSequence(
-        startHour,
-        startMinute,
-        offsetDirection,
-        alarmCount,
-        intervalMinutes
-      ).map((s) => s.timeString);
+      const startTotal = nextStartH * 60 + nextStartM;
+      let endTotal = nextEndH * 60 + nextEndM;
+      if (endTotal <= startTotal) {
+        endTotal += 24 * 60;
+      }
+      const windowSpan = endTotal - startTotal;
+      if (windowSpan > 0 && windowSpan < intervalMinutes) {
+        setIntervalMinutes(Math.max(1, windowSpan));
+      }
     }
+  };
+
+  const previewSteps = useMemo(() => {
+    if (!visible) return [];
+    return getBaseAlarmSteps({
+      type: alarmType,
+      startHour,
+      startMinute,
+      endHour,
+      endMinute,
+      offsetDirection,
+      alarmCount,
+      intervalMinutes,
+      isEscalating: alarmType !== 'single' ? isEscalatingMode : false,
+    });
+  }, [
+    visible,
+    alarmType,
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    offsetDirection,
+    alarmCount,
+    intervalMinutes,
+    isEscalatingMode,
+  ]);
+
+  const handleSave = () => {
+    const generatedSequence =
+      alarmType !== 'single' ? previewSteps.map((s) => s.timeString) : undefined;
 
     const newAlarm: Omit<AlarmItem, 'id'> = {
       type: alarmType,
@@ -118,10 +176,12 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       offsetDirection: alarmType === 'offset' ? offsetDirection : undefined,
       alarmCount: alarmType === 'offset' ? alarmCount : undefined,
       intervalMinutes: alarmType !== 'single' ? intervalMinutes : undefined,
+      isEscalating: alarmType !== 'single' ? isEscalatingMode : undefined,
       repeatDays: [],
       isOneOff: true,
       dismissedForToday: false,
       generatedSequence,
+      category,
     };
 
     onSave(newAlarm);
@@ -132,6 +192,34 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
     alarmType === 'interval' && activeTimeTab === 'end' ? endHour : startHour;
   const currentDialMinute =
     alarmType === 'interval' && activeTimeTab === 'end' ? endMinute : startMinute;
+
+  const liveRingParts = useMemo(() => {
+    if (!visible) return undefined;
+    return getLiveDialParts({
+      type: alarmType,
+      startHour,
+      startMinute,
+      endHour,
+      endMinute,
+      offsetDirection,
+      alarmCount,
+      intervalMinutes,
+      isEscalating: alarmType !== 'single' ? isEscalatingMode : false,
+    });
+  }, [
+    visible,
+    alarmType,
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    offsetDirection,
+    alarmCount,
+    intervalMinutes,
+    isEscalatingMode,
+  ]);
+
+  if (!visible) return null;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -156,7 +244,15 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
           onStartShouldSetResponder={() => true}
         >
           {/* Top Drag Handle (No header title or buttons) */}
-          <View style={styles.handleBar} />
+          <View
+            style={[
+              styles.handleBar,
+              {
+                backgroundColor:
+                  themeMode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : colors.surfaceBorder,
+              },
+            ]}
+          />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -173,7 +269,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 },
               ]}
             >
-              {ALARM_TABS.map((tab) => {
+              {alarmTabs.map((tab) => {
                 const isSelected = alarmType === tab.key;
                 return (
                   <TouchableOpacity
@@ -209,6 +305,9 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               selectedHour={currentDialHour}
               selectedMinute={currentDialMinute}
               onTimeChange={handleTimeChange}
+              resetKey={dialResetKey}
+              isKeyboardMode={isKeyboardMode}
+              liveDurationParts={liveRingParts}
             />
 
             {/* Mode-Specific Controls Below Clock */}
@@ -217,7 +316,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 <View style={styles.intervalCardRow}>
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => setActiveTimeTab('start')}
+                    onPress={() => handleSelectTimeTab('start')}
                     style={[
                       styles.timeSelectorCard,
                       {
@@ -235,7 +334,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         { color: colors.textSecondary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      START TIME
+                      {t.startTime.toUpperCase()}
                     </Text>
                     <Text
                       style={[
@@ -243,13 +342,13 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         { color: colors.textPrimary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      {formatTime12h(startHour, startMinute)}
+                      {formatTime12hLocal(startHour, startMinute).full}
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => setActiveTimeTab('end')}
+                    onPress={() => handleSelectTimeTab('end')}
                     style={[
                       styles.timeSelectorCard,
                       {
@@ -267,7 +366,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         { color: colors.textSecondary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      END TIME
+                      {t.endTime.toUpperCase()}
                     </Text>
                     <Text
                       style={[
@@ -275,14 +374,14 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         { color: colors.textPrimary, fontFamily: typography.numbersBold },
                       ]}
                     >
-                      {formatTime12h(endHour, endMinute)}
+                      {formatTime12hLocal(endHour, endMinute).full}
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
             )}
 
-            {alarmType === 'offset' && (
+            {alarmType === 'offset' && showCreationAdvancedControls && (
               <View style={styles.offsetOptionsContainer}>
                 <View
                   style={[
@@ -314,7 +413,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         },
                       ]}
                     >
-                      Ring Before Target
+                      {t.before}
                     </Text>
                   </TouchableOpacity>
 
@@ -338,10 +437,241 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         },
                       ]}
                     >
-                      Ring After Target
+                      {t.after}
                     </Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+            )}
+
+            {/* Escalating Interval Info Banner (Replaces Interval & Steps when Escalating Mode is ON) */}
+            {alarmType !== 'single' && isEscalatingMode && (
+              <View
+                style={[
+                  styles.escalatingBanner,
+                  {
+                    backgroundColor: colors.primaryMuted,
+                    borderColor: colors.primary + '55',
+                    borderRadius: radii.buttonMedium,
+                  },
+                ]}
+              >
+                <View style={styles.escalatingBannerHeader}>
+                  <View style={styles.escalatingTitleRow}>
+                    <Flame size={16} color={colors.primary} />
+                    <Text
+                      style={[
+                        styles.escalatingBannerTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansBold },
+                      ]}
+                    >
+                      {t.escalatingModeActiveTitle}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.escalatingCountText,
+                      { color: colors.primaryLight, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {t.generatesNAlarms(previewSteps.length)}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.escalatingBannerDesc,
+                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                  ]}
+                >
+                  {alarmType === 'interval'
+                    ? t.escalatingWindowDesc
+                    : t.escalatingModeDesc}
+                </Text>
+              </View>
+            )}
+
+            {/* Interval Length Stepper (For Standard Mode when Advanced Controls enabled) */}
+            {alarmType !== 'single' && !isEscalatingMode && showCreationAdvancedControls && (
+              <View style={styles.sectionContainer}>
+                <Text
+                  style={[
+                    styles.sectionHeading,
+                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  ]}
+                >
+                  {t.intervalLabel.toUpperCase()}
+                </Text>
+                <View
+                  style={[
+                    styles.stepperContainer,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.buttonMedium,
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setIntervalMinutes(Math.max(1, intervalMinutes - 1))}
+                    style={styles.stepperBtn}
+                  >
+                    <Minus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                  </TouchableOpacity>
+
+                  <Text
+                    style={[
+                      styles.stepperValueText,
+                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {t.everyNMin(intervalMinutes)}
+                  </Text>
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setIntervalMinutes(Math.min(60, intervalMinutes + 1))}
+                    style={styles.stepperBtn}
+                  >
+                    <Plus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Offset Alarm Count Stepper (For Offset Standard Mode when Advanced Controls enabled) */}
+            {alarmType === 'offset' && !isEscalatingMode && showCreationAdvancedControls && (
+              <View style={styles.sectionContainer}>
+                <Text
+                  style={[
+                    styles.sectionHeading,
+                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  ]}
+                >
+                  {t.alarmsCountLabel.toUpperCase()}
+                </Text>
+                <View
+                  style={[
+                    styles.stepperContainer,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.buttonMedium,
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setAlarmCount(Math.max(2, alarmCount - 1))}
+                    style={styles.stepperBtn}
+                  >
+                    <Minus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                  </TouchableOpacity>
+
+                  <Text
+                    style={[
+                      styles.stepperValueText,
+                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {t.alarmsCountSummary(alarmCount)}
+                  </Text>
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setAlarmCount(Math.min(30, alarmCount + 1))}
+                    style={styles.stepperBtn}
+                  >
+                    <Plus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Category Tag Selector */}
+            {categories.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <Text
+                  style={[
+                    styles.sectionHeading,
+                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  ]}
+                >
+                  {t.categoryLabel.toUpperCase()}
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.categoryChipsRow}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      safeHaptics.selectionAsync();
+                      setCategory(undefined);
+                    }}
+                    style={[
+                      styles.categoryChip,
+                      {
+                        backgroundColor: !category ? colors.accent : colors.surface,
+                        borderColor: !category ? colors.accent : colors.surfaceBorder,
+                        borderRadius: radii.pill,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        {
+                          color: !category ? '#FFFFFF' : colors.textSecondary,
+                          fontFamily: !category ? typography.sansBold : typography.sansMedium,
+                        },
+                      ]}
+                    >
+                      {t.categoryNone}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {categories.map((cat) => {
+                    const isSelected = category === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          safeHaptics.selectionAsync();
+                          setCategory(isSelected ? undefined : cat);
+                        }}
+                        style={[
+                          styles.categoryChip,
+                          {
+                            backgroundColor: isSelected ? colors.accent : colors.surface,
+                            borderColor: isSelected ? colors.accent : colors.surfaceBorder,
+                            borderRadius: radii.pill,
+                          },
+                        ]}
+                      >
+                        <Tag
+                          size={11}
+                          color={isSelected ? '#FFFFFF' : colors.textSecondary}
+                        />
+                        <Text
+                          style={[
+                            styles.categoryChipText,
+                            {
+                              color: isSelected ? '#FFFFFF' : colors.textSecondary,
+                              fontFamily: isSelected
+                                ? typography.sansBold
+                                : typography.sansMedium,
+                            },
+                          ]}
+                        >
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
             )}
           </ScrollView>
@@ -356,6 +686,29 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               },
             ]}
           >
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                safeHaptics.selectionAsync();
+                setIsKeyboardMode((v) => !v);
+              }}
+              accessibilityLabel={isKeyboardMode ? t.useDialTooltip : t.useKeyboardTooltip}
+              style={[
+                styles.bottomKeypadBtn,
+                {
+                  backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
+                  borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
+                  borderRadius: radii.buttonMedium,
+                },
+              ]}
+            >
+              {isKeyboardMode ? (
+                <Clock size={20} color={colors.primary} />
+              ) : (
+                <Keyboard size={20} color={colors.textSecondary} />
+              )}
+            </TouchableOpacity>
+
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={onClose}
@@ -374,7 +727,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                   { color: colors.textSecondary, fontFamily: typography.numbersBold },
                 ]}
               >
-                Cancel
+                {t.cancel}
               </Text>
             </TouchableOpacity>
 
@@ -395,7 +748,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                   { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
                 ]}
               >
-                Save
+                {t.save}
               </Text>
             </TouchableOpacity>
           </View>
@@ -421,7 +774,6 @@ const styles = StyleSheet.create({
   handleBar: {
     width: 40,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 16,
@@ -442,6 +794,23 @@ const styles = StyleSheet.create({
   typeText: {
     fontSize: 13,
     letterSpacing: 0.2,
+  },
+  categoryChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+  },
+  categoryChipText: {
+    fontSize: 12,
   },
   intervalTimesContainer: {
     marginHorizontal: 16,
@@ -483,18 +852,75 @@ const styles = StyleSheet.create({
   directionTabText: {
     fontSize: 12,
   },
+  escalatingBanner: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    padding: 14,
+    borderWidth: 1,
+  },
+  escalatingBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  escalatingTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  escalatingBannerTitle: {
+    fontSize: 13,
+  },
+  escalatingCountText: {
+    fontSize: 12,
+  },
+  escalatingBannerDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  sectionContainer: {
+    marginHorizontal: 16,
+    marginTop: 14,
+  },
+  sectionHeading: {
+    fontSize: 11,
+    letterSpacing: 0.6,
+    marginBottom: 8,
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  stepperBtn: {
+    padding: 10,
+  },
+  stepperValueText: {
+    fontSize: 15,
+  },
   bottomActionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 24,
     borderTopWidth: 1,
   },
+  bottomKeypadBtn: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   bottomCancelBtn: {
     flex: 1,
-    paddingVertical: 14,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -503,8 +929,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   bottomSaveBtn: {
-    flex: 1.8,
-    paddingVertical: 14,
+    flex: 1.5,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },

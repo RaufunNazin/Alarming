@@ -1,8 +1,8 @@
 // Haptic vibrations completely disabled per user preference
 export const SafeHaptics = {
   selectionAsync: async () => {},
-  impactAsync: async () => {},
-  notificationAsync: async () => {},
+  impactAsync: async (_style?: string) => {},
+  notificationAsync: async (_type?: string) => {},
 
   NotificationFeedbackType: {
     Success: 'success',
@@ -15,3 +15,5 @@ export const SafeHaptics = {
     Heavy: 'heavy',
   } as const,
 };
+
+export const safeHaptics = SafeHaptics;

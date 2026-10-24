@@ -1,10 +1,96 @@
 import { AlarmItem } from '../types';
+import { useSettingsStore } from '../../../core/settings/settingsStore';
+import { formatNumberLocalized, formatTime12hLocalized } from '../../../core/i18n/translations';
 
 export interface IntervalStep {
   timeString: string;
   hour: number;
   minute: number;
   totalMinutesFromStart: number;
+}
+
+export interface ScheduledAlarmStep {
+  stepIndex: number;
+  totalSteps: number;
+  timeString: string;
+  hour: number;
+  minute: number;
+  date: Date;
+  cycleDateStr: string;
+}
+
+/**
+ * Formats a Date as a local YYYY-MM-DD key so local midnight transitions
+ * are not skewed by UTC offsets.
+ */
+export function getLocalDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isCycleDismissedForDate(alarm: AlarmItem, cycleBaseDate: Date): boolean {
+  if (!alarm.dismissedForToday || !alarm.lastDismissedDate) {
+    return false;
+  }
+  const localStr = getLocalDateString(cycleBaseDate);
+  const utcStr = cycleBaseDate.toISOString().slice(0, 10);
+  return alarm.lastDismissedDate === localStr || alarm.lastDismissedDate === utcStr;
+}
+
+export function isCycleSkippedForDate(alarm: AlarmItem, cycleBaseDate: Date): boolean {
+  if (!alarm.skipNextDate) {
+    return false;
+  }
+  const localStr = getLocalDateString(cycleBaseDate);
+  return alarm.skipNextDate === localStr;
+}
+
+/**
+ * Formats a 'YYYY-MM-DD' date string into a concise human-readable label (e.g., "Mon, Oct 26").
+ */
+export function formatSkippedDateLabel(dateStr: string): string {
+  const parts = dateStr.split('-').map((p) => parseInt(p, 10));
+  if (parts.length !== 3 || parts.some(isNaN)) return dateStr;
+  const date = new Date(parts[0], parts[1] - 1, parts[2]);
+  const lang = useSettingsStore.getState().language;
+
+  if (lang === 'bn') {
+    const dayNames = ['রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহঃ', 'শুক্র', 'শনি'];
+    const monthNames = [
+      'জানু',
+      'ফেব্রু',
+      'মার্চ',
+      'এপ্রিল',
+      'মে',
+      'জুন',
+      'জুলাই',
+      'আগস্ট',
+      'সেপ্টে',
+      'অক্টো',
+      'নভে',
+      'ডিসে',
+    ];
+    return `${dayNames[date.getDay()]}, ${formatNumberLocalized(date.getDate(), 'bn')} ${monthNames[date.getMonth()]}`;
+  }
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return `${dayNames[date.getDay()]}, ${monthNames[date.getMonth()]} ${date.getDate()}`;
 }
 
 /**
@@ -76,6 +162,22 @@ export function generateIntervalSequence(
     });
   }
 
+  // Always guarantee the explicit End Time is included as the final step
+  // if the window duration is not an exact multiple of safeInterval (or is shorter than safeInterval)
+  const totalWindowMinutes = endTotal - startTotal;
+  const lastStep = steps[steps.length - 1];
+  if (totalWindowMinutes > 0 && lastStep.totalMinutesFromStart < totalWindowMinutes) {
+    const endNormalized = endTotal % (24 * 60);
+    const endH = Math.floor(endNormalized / 60);
+    const endM = endNormalized % 60;
+    steps.push({
+      timeString: formatTime12h(endH, endM),
+      hour: endH,
+      minute: endM,
+      totalMinutesFromStart: totalWindowMinutes,
+    });
+  }
+
   return steps;
 }
 
@@ -136,36 +238,451 @@ export function generateOffsetSequence(
 }
 
 /**
- * Returns formatted time display string for any AlarmItem (single, interval, offset)
+ * Generates an automatic escalating interval sequence across a Start -> End window.
+ * Intervals progressively shrink as End Time approaches (e.g., 20m -> 15m -> 10m -> 5m -> 3m -> 2m -> 1m).
  */
-export function formatAlarmTimeDisplay(alarm: AlarmItem): string {
-  if (alarm.type === 'single') {
-    return formatTime12h(alarm.startHour, alarm.startMinute);
+export function generateEscalatingIntervalSequence(
+  startHour: number,
+  startMinute: number,
+  endHour: number,
+  endMinute: number
+): IntervalStep[] {
+  const startTotal = startHour * 60 + startMinute;
+  let endTotal = endHour * 60 + endMinute;
+
+  if (endTotal <= startTotal) {
+    endTotal += 24 * 60;
   }
 
+  const totalWindow = endTotal - startTotal;
+  if (totalWindow <= 1) {
+    const startNorm = startTotal % (24 * 60);
+    const endNorm = endTotal % (24 * 60);
+    const result: IntervalStep[] = [
+      {
+        timeString: formatTime12h(Math.floor(startNorm / 60), startNorm % 60),
+        hour: Math.floor(startNorm / 60),
+        minute: startNorm % 60,
+        totalMinutesFromStart: 0,
+      },
+    ];
+    if (totalWindow === 1) {
+      result.push({
+        timeString: formatTime12h(Math.floor(endNorm / 60), endNorm % 60),
+        hour: Math.floor(endNorm / 60),
+        minute: endNorm % 60,
+        totalMinutesFromStart: 1,
+      });
+    }
+    return result;
+  }
+
+  const reverseGaps = [1, 2, 3, 5, 10, 15, 20, 25, 30, 30, 30, 30];
+  const minutePoints: number[] = [endTotal];
+  let cursor = endTotal;
+
+  for (const gap of reverseGaps) {
+    const candidate = cursor - gap;
+    const remainingToStart = candidate - startTotal;
+    if (remainingToStart >= gap) {
+      minutePoints.push(candidate);
+      cursor = candidate;
+    } else {
+      break;
+    }
+  }
+
+  if (minutePoints[minutePoints.length - 1] !== startTotal) {
+    minutePoints.push(startTotal);
+  }
+
+  minutePoints.reverse();
+
+  return minutePoints.map((absMin) => {
+    const normalizedMinutes = absMin % (24 * 60);
+    const hour = Math.floor(normalizedMinutes / 60);
+    const minute = normalizedMinutes % 60;
+    return {
+      timeString: formatTime12h(hour, minute),
+      hour,
+      minute,
+      totalMinutesFromStart: absMin - startTotal,
+    };
+  });
+}
+
+/**
+ * Generates an automatic escalating sequence for a Before/After Offset alarm.
+ * Uses smart tightening gaps: [15, 10, 5, 3, 2, 1] minutes (7 steps across 36 minutes).
+ */
+export function generateEscalatingOffsetSequence(
+  targetHour: number,
+  targetMinute: number,
+  direction: 'before' | 'after' = 'before'
+): IntervalStep[] {
+  const gaps = [15, 10, 5, 3, 2, 1];
+  const totalSpan = gaps.reduce((acc, g) => acc + g, 0); // 36 minutes
+  const targetTotal = targetHour * 60 + targetMinute;
+
+  const offsetsFromFirst: number[] = [0];
+  let running = 0;
+  for (const g of gaps) {
+    running += g;
+    offsetsFromFirst.push(running);
+  }
+
+  const firstStepTotal = direction === 'before' ? targetTotal - totalSpan : targetTotal;
+
+  return offsetsFromFirst.map((offsetMin) => {
+    let stepTotal = firstStepTotal + offsetMin;
+    while (stepTotal < 0) {
+      stepTotal += 24 * 60;
+    }
+    const normalizedMinutes = stepTotal % (24 * 60);
+    const hour = Math.floor(normalizedMinutes / 60);
+    const minute = normalizedMinutes % 60;
+    return {
+      timeString: formatTime12h(hour, minute),
+      hour,
+      minute,
+      totalMinutesFromStart: offsetMin,
+    };
+  });
+}
+
+/**
+ * Returns the base (unmodified) sequence of IntervalStep objects for any alarm type ('single' | 'interval' | 'offset').
+ */
+export function getBaseAlarmSteps(
+  alarm: Pick<
+    AlarmItem,
+    | 'type'
+    | 'startHour'
+    | 'startMinute'
+    | 'endHour'
+    | 'endMinute'
+    | 'intervalMinutes'
+    | 'offsetDirection'
+    | 'alarmCount'
+    | 'isEscalating'
+  >
+): IntervalStep[] {
   if (alarm.type === 'interval') {
-    const endH = alarm.endHour ?? alarm.startHour;
-    const endM = alarm.endMinute ?? alarm.startMinute;
-    return `${formatTime12h(alarm.startHour, alarm.startMinute)} – ${formatTime12h(endH, endM)}`;
+    if (alarm.isEscalating) {
+      return generateEscalatingIntervalSequence(
+        alarm.startHour,
+        alarm.startMinute,
+        alarm.endHour ?? alarm.startHour,
+        alarm.endMinute ?? alarm.startMinute
+      );
+    }
+    return generateIntervalSequence(
+      alarm.startHour,
+      alarm.startMinute,
+      alarm.endHour ?? alarm.startHour,
+      alarm.endMinute ?? alarm.startMinute,
+      alarm.intervalMinutes ?? 10
+    );
   }
 
   if (alarm.type === 'offset') {
-    const seq = generateOffsetSequence(
+    if (alarm.isEscalating) {
+      return generateEscalatingOffsetSequence(
+        alarm.startHour,
+        alarm.startMinute,
+        alarm.offsetDirection || 'before'
+      );
+    }
+    return generateOffsetSequence(
       alarm.startHour,
       alarm.startMinute,
       alarm.offsetDirection || 'before',
       alarm.alarmCount || 10,
       alarm.intervalMinutes || 10
     );
-    if (seq.length > 0) {
-      const first = seq[0].timeString;
-      const last = seq[seq.length - 1].timeString;
-      return `${first} – ${last}`;
-    }
-    return formatTime12h(alarm.startHour, alarm.startMinute);
   }
 
-  return formatTime12h(alarm.startHour, alarm.startMinute);
+  return [
+    {
+      timeString: formatTime12h(alarm.startHour, alarm.startMinute),
+      hour: alarm.startHour,
+      minute: alarm.startMinute,
+      totalMinutesFromStart: 0,
+    },
+  ];
+}
+
+/**
+ * Returns the active sequence of IntervalStep objects for any alarm type ('single' | 'interval' | 'offset'),
+ * respecting per-step `customSteps` overrides (individual timing adjustments and on/off states).
+ */
+export function getAlarmSteps(
+  alarm: Pick<
+    AlarmItem,
+    | 'type'
+    | 'startHour'
+    | 'startMinute'
+    | 'endHour'
+    | 'endMinute'
+    | 'intervalMinutes'
+    | 'offsetDirection'
+    | 'alarmCount'
+    | 'isEscalating'
+    | 'customSteps'
+  >
+): IntervalStep[] {
+  if (alarm.customSteps && alarm.customSteps.length > 0) {
+    const enabledSteps = alarm.customSteps.filter((s) => s.isEnabled);
+    const sourceSteps = enabledSteps.length > 0 ? enabledSteps : [alarm.customSteps[0]];
+    const firstTotal = sourceSteps[0].hour * 60 + sourceSteps[0].minute;
+    let prevAbsolute = firstTotal;
+
+    return sourceSteps.map((step, index) => {
+      if (index === 0) {
+        return {
+          timeString: formatTime12h(step.hour, step.minute),
+          hour: step.hour,
+          minute: step.minute,
+          totalMinutesFromStart: 0,
+        };
+      }
+      let currentAbsolute = step.hour * 60 + step.minute;
+      while (currentAbsolute < prevAbsolute) {
+        currentAbsolute += 24 * 60;
+      }
+      prevAbsolute = currentAbsolute;
+      return {
+        timeString: formatTime12h(step.hour, step.minute),
+        hour: step.hour,
+        minute: step.minute,
+        totalMinutesFromStart: currentAbsolute - firstTotal,
+      };
+    });
+  }
+
+  return getBaseAlarmSteps(alarm);
+}
+
+/**
+ * Returns formatted time display string for any AlarmItem (single, interval, offset)
+ */
+export function formatAlarmTimeDisplay(alarm: AlarmItem): string {
+  const lang = useSettingsStore.getState().language;
+  const steps = getAlarmSteps(alarm);
+  if (steps.length > 1) {
+    const first = formatTime12hLocalized(steps[0].hour, steps[0].minute, lang).full;
+    const last = formatTime12hLocalized(
+      steps[steps.length - 1].hour,
+      steps[steps.length - 1].minute,
+      lang
+    ).full;
+    return `${first} – ${last}`;
+  }
+  if (steps.length === 1) {
+    return formatTime12hLocalized(steps[0].hour, steps[0].minute, lang).full;
+  }
+  return formatTime12hLocalized(alarm.startHour, alarm.startMinute, lang).full;
+}
+
+/**
+ * Resolves the upcoming scheduled steps for the active or next occurrence cycle of an alarm.
+ * Properly preserves remaining steps of an in-progress Window or Offset cycle today
+ * (or an overnight window that started before midnight) instead of skipping to tomorrow.
+ */
+export function getUpcomingAlarmStepDates(
+  alarm: AlarmItem,
+  referenceDate: Date = new Date(),
+  ignoreSkipNext: boolean = false
+): ScheduledAlarmStep[] {
+  const now = referenceDate;
+  const nowMs = now.getTime();
+  const steps = getAlarmSteps(alarm);
+  const firstStep = steps[0];
+  const lastStep = steps[steps.length - 1];
+  const isMultiStep = lastStep.totalMinutesFromStart > 0;
+  const hasRepeatDays = Boolean(alarm.repeatDays && alarm.repeatDays.length > 0);
+
+  // Check dayOffset = -1 (yesterday's overnight cycle spilling into today),
+  // dayOffset = 0 (today), and dayOffset = 1..14 (upcoming days, extended so skipping still finds next cycle).
+  for (let dayOffset = -1; dayOffset <= 14; dayOffset++) {
+    if (dayOffset === -1 && !isMultiStep) {
+      continue;
+    }
+
+    const cycleBaseDate = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + dayOffset,
+      firstStep.hour,
+      firstStep.minute,
+      0,
+      0
+    );
+
+    // An overnight cycle from yesterday only applies if the alarm was already enabled
+    // before or during that cycle's start (prevents a newly created alarm after midnight
+    // from thinking it started yesterday).
+    if (
+      dayOffset === -1 &&
+      alarm.enabledAt &&
+      cycleBaseDate.getTime() < alarm.enabledAt - 60 * 1000
+    ) {
+      continue;
+    }
+
+    if (hasRepeatDays) {
+      const candidateDay = cycleBaseDate.getDay();
+      if (!alarm.repeatDays.includes(candidateDay)) {
+        continue;
+      }
+    }
+
+    if (isCycleDismissedForDate(alarm, cycleBaseDate)) {
+      continue;
+    }
+
+    if (!ignoreSkipNext && isCycleSkippedForDate(alarm, cycleBaseDate)) {
+      continue;
+    }
+
+    const cycleDateStr = getLocalDateString(cycleBaseDate);
+    const upcomingSteps: ScheduledAlarmStep[] = [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const stepDate = new Date(
+        cycleBaseDate.getTime() + step.totalMinutesFromStart * 60 * 1000
+      );
+
+      if (stepDate.getTime() > nowMs) {
+        upcomingSteps.push({
+          stepIndex: i,
+          totalSteps: steps.length,
+          timeString: step.timeString,
+          hour: step.hour,
+          minute: step.minute,
+          date: stepDate,
+          cycleDateStr,
+        });
+      }
+    }
+
+    if (upcomingSteps.length > 0) {
+      return upcomingSteps;
+    }
+  }
+
+  // Fallback to tomorrow if all 7 days were somehow skipped
+  const fallbackBase = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+    firstStep.hour,
+    firstStep.minute,
+    0,
+    0
+  );
+  const fallbackDateStr = getLocalDateString(fallbackBase);
+  return steps.map((step, i) => ({
+    stepIndex: i,
+    totalSteps: steps.length,
+    timeString: step.timeString,
+    hour: step.hour,
+    minute: step.minute,
+    date: new Date(fallbackBase.getTime() + step.totalMinutesFromStart * 60 * 1000),
+    cycleDateStr: fallbackDateStr,
+  }));
+}
+
+/**
+ * Finds the step (if any) that is due to ring during the current minute of `now`.
+ * Respects `enabledAt`, `dismissedForToday`, `repeatDays`, and overnight sequences.
+ */
+export function findDueAlarmStepAtTime(
+  alarm: AlarmItem,
+  now: Date = new Date()
+): ScheduledAlarmStep | null {
+  if (!alarm.isEnabled) return null;
+
+  const steps = getAlarmSteps(alarm);
+  const firstStep = steps[0];
+  const lastStep = steps[steps.length - 1];
+  const isMultiStep = lastStep.totalMinutesFromStart > 0;
+  const hasRepeatDays = Boolean(alarm.repeatDays && alarm.repeatDays.length > 0);
+
+  const currentMinuteStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+    now.getMinutes(),
+    0,
+    0
+  ).getTime();
+
+  for (let dayOffset = -1; dayOffset <= 0; dayOffset++) {
+    if (dayOffset === -1 && !isMultiStep) {
+      continue;
+    }
+
+    const cycleBaseDate = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + dayOffset,
+      firstStep.hour,
+      firstStep.minute,
+      0,
+      0
+    );
+
+    if (
+      dayOffset === -1 &&
+      alarm.enabledAt &&
+      cycleBaseDate.getTime() < alarm.enabledAt - 60 * 1000
+    ) {
+      continue;
+    }
+
+    if (hasRepeatDays && !alarm.repeatDays.includes(cycleBaseDate.getDay())) {
+      continue;
+    }
+
+    if (isCycleDismissedForDate(alarm, cycleBaseDate)) {
+      continue;
+    }
+
+    if (isCycleSkippedForDate(alarm, cycleBaseDate)) {
+      continue;
+    }
+
+    const cycleDateStr = getLocalDateString(cycleBaseDate);
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const stepTimeMs =
+        cycleBaseDate.getTime() + step.totalMinutesFromStart * 60 * 1000;
+
+      if (stepTimeMs === currentMinuteStart) {
+        // If the alarm was just created/enabled/updated AFTER this minute's :00 mark already passed,
+        // do not falsely trigger this past minute immediately upon save.
+        if (alarm.enabledAt && alarm.enabledAt > stepTimeMs + 1000) {
+          continue;
+        }
+
+        return {
+          stepIndex: i,
+          totalSteps: steps.length,
+          timeString: step.timeString,
+          hour: step.hour,
+          minute: step.minute,
+          date: new Date(stepTimeMs),
+          cycleDateStr,
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -173,62 +690,48 @@ export function formatAlarmTimeDisplay(alarm: AlarmItem): string {
  * "Today", "Tomorrow", "Every day", "Sun–Thu", "Mon–Fri", "Weekends", etc.
  */
 export function getSmartScheduleString(alarm: AlarmItem, referenceDate: Date = new Date()): string {
+  const lang = useSettingsStore.getState().language;
+
   // If one-off / no repeat
   if (!alarm.repeatDays || alarm.repeatDays.length === 0) {
-    const curHour = referenceDate.getHours();
-    const curMin = referenceDate.getMinutes();
-
-    let triggerHour = alarm.startHour;
-    let triggerMinute = alarm.startMinute;
-
-    // For offset alarms with 'before', earliest trigger is the first step
-    if (alarm.type === 'offset' && alarm.offsetDirection === 'before') {
-      const seq = generateOffsetSequence(
-        alarm.startHour,
-        alarm.startMinute,
-        'before',
-        alarm.alarmCount || 10,
-        alarm.intervalMinutes || 10
-      );
-      if (seq.length > 0) {
-        triggerHour = seq[0].hour;
-        triggerMinute = seq[0].minute;
-      }
+    const nextDate = calculateNextOccurrence(alarm, referenceDate);
+    const isToday = getLocalDateString(nextDate) === getLocalDateString(referenceDate);
+    if (lang === 'bn') {
+      return isToday ? 'আজ' : 'আগামীকাল';
     }
-
-    const alarmMins = triggerHour * 60 + triggerMinute;
-    const nowMins = curHour * 60 + curMin;
-
-    return alarmMins > nowMins ? 'Today' : 'Tomorrow';
+    return isToday ? 'Today' : 'Tomorrow';
   }
 
   const days = alarm.repeatDays.slice().sort((a, b) => a - b);
 
   if (days.length === 7) {
-    return 'Every day';
+    return lang === 'bn' ? 'প্রতিদিন' : 'Every day';
   }
 
   // Weekdays (Mon-Fri) [1, 2, 3, 4, 5]
   if (days.length === 5 && days.join(',') === '1,2,3,4,5') {
-    return 'Mon–Fri';
+    return lang === 'bn' ? 'সোম–শুক্র' : 'Mon–Fri';
   }
 
   // Sun-Thu [0, 1, 2, 3, 4]
   if (days.length === 5 && days.join(',') === '0,1,2,3,4') {
-    return 'Sun–Thu';
+    return lang === 'bn' ? 'রবি–বৃহঃ' : 'Sun–Thu';
   }
 
   // Weekends [0, 6]
   if (days.length === 2 && days.join(',') === '0,6') {
-    return 'Weekends';
+    return lang === 'bn' ? 'ছুটির দিন' : 'Weekends';
   }
 
   // Fri-Sat [5, 6]
   if (days.length === 2 && days.join(',') === '5,6') {
-    return 'Fri–Sat';
+    return lang === 'bn' ? 'শুক্র–শনি' : 'Fri–Sat';
   }
 
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNames =
+    lang === 'bn'
+      ? ['রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহঃ', 'শুক্র', 'শনি']
+      : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Check if consecutive range e.g. Mon-Thu (1,2,3,4)
   let isConsecutive = true;
@@ -251,81 +754,8 @@ export function getSmartScheduleString(alarm: AlarmItem, referenceDate: Date = n
  * Calculates the exact next Date when an alarm will trigger.
  */
 export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = new Date()): Date {
-  const now = referenceDate;
-  const currentDayOfWeek = now.getDay(); // 0 = Sun ... 6 = Sat
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const currentSeconds = now.getSeconds();
-
-  let effectiveHour = alarm.startHour;
-  let effectiveMinute = alarm.startMinute;
-
-  // If offset before, trigger begins at the earliest step
-  if (alarm.type === 'offset' && alarm.offsetDirection === 'before') {
-    const seq = generateOffsetSequence(
-      alarm.startHour,
-      alarm.startMinute,
-      'before',
-      alarm.alarmCount || 10,
-      alarm.intervalMinutes || 10
-    );
-    if (seq.length > 0) {
-      effectiveHour = seq[0].hour;
-      effectiveMinute = seq[0].minute;
-    }
-  }
-
-  const isTodayDismissed =
-    alarm.dismissedForToday &&
-    alarm.lastDismissedDate === now.toISOString().slice(0, 10);
-
-  // If alarm is One-Off (empty repeatDays)
-  if (!alarm.repeatDays || alarm.repeatDays.length === 0) {
-    const target = new Date(now);
-    target.setHours(effectiveHour, effectiveMinute, 0, 0);
-
-    const isPastToday =
-      currentHour > effectiveHour ||
-      (currentHour === effectiveHour && currentMinute >= effectiveMinute && currentSeconds >= 1);
-
-    if (isPastToday || isTodayDismissed) {
-      target.setDate(target.getDate() + 1);
-    }
-    return target;
-  }
-
-  // If alarm repeats on specific days
-  for (let offset = 0; offset <= 7; offset++) {
-    const candidateDay = (currentDayOfWeek + offset) % 7;
-    if (alarm.repeatDays.includes(candidateDay)) {
-      const target = new Date(now);
-      target.setDate(target.getDate() + offset);
-      target.setHours(effectiveHour, effectiveMinute, 0, 0);
-
-      const candidateDateStr = target.toISOString().slice(0, 10);
-      const isCandidateDismissed =
-        alarm.dismissedForToday && alarm.lastDismissedDate === candidateDateStr;
-
-      if (offset === 0) {
-        const isPastToday =
-          currentHour > effectiveHour ||
-          (currentHour === effectiveHour && currentMinute >= effectiveMinute);
-
-        if (!isPastToday && !isCandidateDismissed) {
-          return target;
-        }
-      } else {
-        if (!isCandidateDismissed) {
-          return target;
-        }
-      }
-    }
-  }
-
-  const fallback = new Date(now);
-  fallback.setDate(fallback.getDate() + 1);
-  fallback.setHours(effectiveHour, effectiveMinute, 0, 0);
-  return fallback;
+  const upcomingSteps = getUpcomingAlarmStepDates(alarm, referenceDate);
+  return upcomingSteps[0].date;
 }
 
 /**
@@ -334,15 +764,34 @@ export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = 
  */
 export function getGoogleCountdownText(targetDate: Date, referenceDate: Date = new Date()): string {
   const diffMs = targetDate.getTime() - referenceDate.getTime();
+  const lang = useSettingsStore.getState().language;
 
   if (diffMs <= 0) {
-    return 'Ringing now';
+    return lang === 'bn' ? 'এখন বাজছে' : 'Ringing now';
   }
 
   const totalMinutes = Math.floor(diffMs / (1000 * 60));
   const days = Math.floor(totalMinutes / (24 * 60));
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
   const minutes = totalMinutes % 60;
+
+  if (lang === 'bn') {
+    if (days > 0) {
+      const dStr = `${formatNumberLocalized(days, 'bn')} দিন`;
+      const hStr = `${formatNumberLocalized(hours, 'bn')} ঘণ্টা`;
+      return `আর ${dStr} ${hStr} পর বাজবে`;
+    }
+    if (hours > 0) {
+      const hStr = `${formatNumberLocalized(hours, 'bn')} ঘণ্টা`;
+      if (minutes === 0) return `আর ${hStr} পর বাজবে`;
+      const mStr = `${formatNumberLocalized(minutes, 'bn')} মিনিট`;
+      return `আর ${hStr} ${mStr} পর বাজবে`;
+    }
+    if (minutes > 0) {
+      return `আর ${formatNumberLocalized(minutes, 'bn')} মিনিট পর বাজবে`;
+    }
+    return '১ মিনিটের মধ্যেই বাজবে';
+  }
 
   if (days > 0) {
     const dayStr = days === 1 ? '1 day' : `${days} days`;
@@ -373,18 +822,35 @@ export function getGoogleCountdownText(targetDate: Date, referenceDate: Date = n
  */
 export function getAlarmSetDurationToastText(targetDate: Date, referenceDate: Date = new Date()): string {
   const diffMs = targetDate.getTime() - referenceDate.getTime();
+  const lang = useSettingsStore.getState().language;
+
   if (diffMs <= 0) {
-    return 'Alarm set for less than a minute from now';
+    return lang === 'bn'
+      ? 'আর ১ মিনিটের মধ্যেই অ্যালার্ম বাজবে'
+      : 'Alarm set for less than a minute from now';
   }
 
   const totalMinutes = Math.round(diffMs / (1000 * 60));
   if (totalMinutes <= 0) {
-    return 'Alarm set for less than a minute from now';
+    return lang === 'bn'
+      ? 'আর ১ মিনিটের মধ্যেই অ্যালার্ম বাজবে'
+      : 'Alarm set for less than a minute from now';
   }
 
   const days = Math.floor(totalMinutes / (24 * 60));
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
   const minutes = totalMinutes % 60;
+
+  if (lang === 'bn') {
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${formatNumberLocalized(days, 'bn')} দিন`);
+    if (hours > 0) parts.push(`${formatNumberLocalized(hours, 'bn')} ঘণ্টা`);
+    if (minutes > 0) parts.push(`${formatNumberLocalized(minutes, 'bn')} মিনিট`);
+    if (parts.length === 0) {
+      return 'আর ১ মিনিটের মধ্যেই অ্যালার্ম বাজবে';
+    }
+    return `অ্যালার্ম সেট হয়েছে • আর ${parts.join(' ')} পর বাজবে`;
+  }
 
   const parts: string[] = [];
   if (days > 0) {
@@ -430,6 +896,8 @@ export function getAlarmToastMessage(
     offsetDirection: alarm.offsetDirection,
     alarmCount: alarm.alarmCount,
     intervalMinutes: alarm.intervalMinutes,
+    isEscalating: alarm.isEscalating,
+    customSteps: alarm.customSteps,
     repeatDays: alarm.repeatDays || [],
     label: alarm.label || '',
     isEnabled: true,
@@ -437,6 +905,156 @@ export function getAlarmToastMessage(
   };
   const targetDate = calculateNextOccurrence(fullAlarm, referenceDate);
   return getAlarmSetDurationToastText(targetDate, referenceDate);
+}
+
+/**
+ * Returns live dial time-to-ring badge text:
+ * e.g., "Alarm rings in 7 hours 24 minutes"
+ */
+export function getLiveDialDurationText(
+  alarm: Partial<AlarmItem> & { startHour: number; startMinute: number },
+  referenceDate: Date = new Date()
+): string {
+  const fullAlarm: AlarmItem = {
+    id: alarm.id || 'temp',
+    type: alarm.type || 'single',
+    startHour: alarm.startHour,
+    startMinute: alarm.startMinute,
+    endHour: alarm.endHour,
+    endMinute: alarm.endMinute,
+    offsetDirection: alarm.offsetDirection,
+    alarmCount: alarm.alarmCount,
+    intervalMinutes: alarm.intervalMinutes,
+    isEscalating: alarm.isEscalating,
+    customSteps: alarm.customSteps,
+    repeatDays: alarm.repeatDays || [],
+    label: alarm.label || '',
+    isEnabled: true,
+    dismissedForToday: false,
+  };
+  const targetDate = calculateNextOccurrence(fullAlarm, referenceDate);
+  const diffMs = targetDate.getTime() - referenceDate.getTime();
+  const lang = useSettingsStore.getState().language;
+
+  if (diffMs <= 0) {
+    return lang === 'bn' ? 'আর ১ মিনিটের মধ্যেই বাজবে' : 'Alarm rings in less than a minute';
+  }
+
+  const totalMinutes = Math.ceil(diffMs / (1000 * 60));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (lang === 'bn') {
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${formatNumberLocalized(days, 'bn')} দিন`);
+    if (hours > 0) parts.push(`${formatNumberLocalized(hours, 'bn')} ঘণ্টা`);
+    if (minutes > 0) parts.push(`${formatNumberLocalized(minutes, 'bn')} মিনিট`);
+    if (parts.length === 0) return 'আর ১ মিনিটের মধ্যেই বাজবে';
+    return `আর ${parts.join(' ')} পর বাজবে`;
+  }
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(days === 1 ? '1 day' : `${days} days`);
+  if (hours > 0) parts.push(hours === 1 ? '1 hour' : `${hours} hours`);
+  if (minutes > 0) parts.push(minutes === 1 ? '1 minute' : `${minutes} minutes`);
+
+  if (parts.length === 0) {
+    return 'Alarm rings in less than a minute';
+  }
+
+  return `Alarm rings in ${parts.join(' ')}`;
+}
+
+export interface LiveDialDurationParts {
+  hoursText: string | null;
+  minutesText: string;
+}
+
+/**
+ * Returns structured duration parts for the vertical 3-line "Rings in" block in GoogleRadialClock:
+ * - hoursText: e.g. "7h" (or null if < 1 hour so the hours line is omitted)
+ * - minutesText: e.g. "24m"
+ */
+export function getLiveDialParts(
+  alarm: Partial<AlarmItem> & { startHour: number; startMinute: number },
+  referenceDate: Date = new Date()
+): LiveDialDurationParts {
+  const fullAlarm: AlarmItem = {
+    id: alarm.id || 'temp',
+    type: alarm.type || 'single',
+    startHour: alarm.startHour,
+    startMinute: alarm.startMinute,
+    endHour: alarm.endHour,
+    endMinute: alarm.endMinute,
+    offsetDirection: alarm.offsetDirection,
+    alarmCount: alarm.alarmCount,
+    intervalMinutes: alarm.intervalMinutes,
+    isEscalating: alarm.isEscalating,
+    customSteps: alarm.customSteps,
+    repeatDays: alarm.repeatDays || [],
+    label: alarm.label || '',
+    isEnabled: true,
+    dismissedForToday: false,
+  };
+  const targetDate = calculateNextOccurrence(fullAlarm, referenceDate);
+  const diffMs = Math.max(0, targetDate.getTime() - referenceDate.getTime());
+  const lang = useSettingsStore.getState().language;
+
+  const totalMinutes = Math.max(1, Math.ceil(diffMs / (1000 * 60)));
+  const totalHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (lang === 'bn') {
+    return {
+      hoursText:
+        totalHours > 0 ? `${formatNumberLocalized(totalHours, 'bn')}ঘঃ` : null,
+      minutesText: `${formatNumberLocalized(minutes, 'bn')}মিঃ`,
+    };
+  }
+
+  return {
+    hoursText: totalHours > 0 ? `${totalHours}h` : null,
+    minutesText: `${minutes}m`,
+  };
+}
+
+/**
+ * Returns compact countdown string for GreetingHeader Sleep Window Counter:
+ * e.g. "6h 45m", "22m", "1d 4h"
+ */
+export function getCompactCountdownText(targetDate: Date, referenceDate: Date = new Date()): string {
+  const diffMs = targetDate.getTime() - referenceDate.getTime();
+  const lang = useSettingsStore.getState().language;
+
+  if (diffMs <= 0) {
+    return lang === 'bn' ? '<১মি' : '<1m';
+  }
+
+  const totalMinutes = Math.ceil(diffMs / (1000 * 60));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (lang === 'bn') {
+    if (days > 0) {
+      return `${formatNumberLocalized(days, 'bn')}দিন ${formatNumberLocalized(hours, 'bn')}ঘণ্টা`;
+    }
+    if (hours > 0) {
+      return minutes > 0
+        ? `${formatNumberLocalized(hours, 'bn')}ঘঃ ${formatNumberLocalized(minutes, 'bn')}মিঃ`
+        : `${formatNumberLocalized(hours, 'bn')}ঘঃ`;
+    }
+    return `${formatNumberLocalized(Math.max(1, minutes), 'bn')}মিঃ`;
+  }
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${Math.max(1, minutes)}m`;
 }
 
 /**

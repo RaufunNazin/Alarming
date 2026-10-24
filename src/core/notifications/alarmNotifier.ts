@@ -2,11 +2,10 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AlarmItem } from '../../modules/interval-alarm/types';
 import {
-  calculateNextOccurrence,
-  generateIntervalSequence,
-  generateOffsetSequence,
+  getUpcomingAlarmStepDates,
   formatTime12h,
 } from '../../modules/interval-alarm/engine/intervalEngine';
+import { alarmSoundPlayer } from '../audio/alarmSoundPlayer';
 
 export const ALARM_CHANNEL_ID = 'alarming_interval_alarm_channel_v3';
 export const INTERVAL_CATEGORY_ID = 'ALARMING_INTERVAL_CATEGORY';
@@ -16,6 +15,23 @@ export const ACTION_DISMISS_ALL = 'DISMISS_ALL_REMAINING';
 export const ACTION_SNOOZE_NEXT = 'SNOOZE_NEXT';
 export const ACTION_DISMISS_SINGLE = 'DISMISS_SINGLE';
 export const ACTION_SNOOZE_SINGLE = 'SNOOZE_SINGLE';
+
+/**
+ * Rolling window cap per alarm so large windows never saturate OS AlarmManager / UNUserNotificationCenter
+ * (iOS enforces a 64-notification system limit across the whole app).
+ * Automatically replenished as steps ring or when the app wakes/ticks.
+ */
+export const MAX_SCHEDULED_STEPS_PER_ALARM = 24;
+const SCHEDULE_BATCH_CHUNK_SIZE = 8;
+
+// Per-alarm operation token to abort stale in-flight scheduling if an alarm is edited, toggled, or deleted
+const latestScheduleTokenByAlarmId: Record<string, number> = {};
+
+function nextAlarmScheduleToken(alarmId: string): number {
+  const next = (latestScheduleTokenByAlarmId[alarmId] || 0) + 1;
+  latestScheduleTokenByAlarmId[alarmId] = next;
+  return next;
+}
 
 // On iOS, 'defaultRingtone' invokes the system ringtone/alarm; on Android, channel routes to TYPE_ALARM
 const ALARM_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'defaultRingtone' : 'default';
@@ -118,15 +134,22 @@ export async function initializeAlarmNotifications(): Promise<void> {
           },
         });
       }
+
+      // Ensure Android 14+ (API 34+) full-screen lockscreen intent permission is enabled
+      const canUseFullScreen = await alarmSoundPlayer.canUseFullScreenIntent();
+      if (!canUseFullScreen) {
+        alarmSoundPlayer.openFullScreenIntentSettings();
+      }
     }
 
     // Set up interactive lock-screen action buttons
     await Notifications.setNotificationCategoryAsync(INTERVAL_CATEGORY_ID, [
       {
         identifier: ACTION_DISMISS_SINGLE,
-        buttonTitle: 'Dismiss',
+        buttonTitle: 'Stop',
         options: {
           opensAppToForeground: false,
+          isAuthenticationRequired: false,
         },
       },
       {
@@ -134,6 +157,15 @@ export async function initializeAlarmNotifications(): Promise<void> {
         buttonTitle: 'Snooze',
         options: {
           opensAppToForeground: false,
+          isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: ACTION_DISMISS_ALL,
+        buttonTitle: 'Stop All Today',
+        options: {
+          opensAppToForeground: false,
+          isAuthenticationRequired: false,
         },
       },
     ]);
@@ -144,6 +176,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
         buttonTitle: 'Dismiss',
         options: {
           opensAppToForeground: false,
+          isAuthenticationRequired: false,
         },
       },
       {
@@ -151,6 +184,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
         buttonTitle: 'Snooze',
         options: {
           opensAppToForeground: false,
+          isAuthenticationRequired: false,
         },
       },
     ]);
@@ -160,147 +194,163 @@ export async function initializeAlarmNotifications(): Promise<void> {
 }
 
 /**
- * Schedules all alarms for an enabled AlarmItem.
+ * Helper to cancel all scheduled OS notifications belonging to a specific alarmId
+ * (both known `notificationIds` and any matching scheduled notifications in the OS queue)
+ * concurrently via `Promise.all`.
+ */
+async function cancelScheduledIdsForAlarmInternal(
+  alarmId: string,
+  knownNotificationIds?: string[]
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  const idsToCancel = new Set<string>(knownNotificationIds || []);
+
+  try {
+    const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const req of allScheduled) {
+      if (req.content?.data?.alarmId === alarmId) {
+        idsToCancel.add(req.identifier);
+      }
+    }
+  } catch {}
+
+  if (idsToCancel.size === 0) return;
+
+  const idList = Array.from(idsToCancel);
+  for (let i = 0; i < idList.length; i += SCHEDULE_BATCH_CHUNK_SIZE) {
+    const chunk = idList.slice(i, i + SCHEDULE_BATCH_CHUNK_SIZE);
+    await Promise.all(
+      chunk.map((notifId) =>
+        Notifications.cancelScheduledNotificationAsync(notifId).catch(() => {})
+      )
+    );
+  }
+}
+
+/**
+ * Schedules a rolling window of up to MAX_SCHEDULED_STEPS_PER_ALARM upcoming steps
+ * for an enabled AlarmItem in fast parallel chunks.
  * Returns the list of scheduled notification IDs.
  */
 export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<string[]> {
-  if (!alarm.isEnabled || Platform.OS === 'web') {
+  if (Platform.OS === 'web') {
     return [];
   }
 
-  // Cancel any previously scheduled notifications for this alarm
-  if (alarm.notificationIds && alarm.notificationIds.length > 0) {
-    for (const notifId of alarm.notificationIds) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(notifId);
-      } catch {}
+  const token = nextAlarmScheduleToken(alarm.id);
+
+  // Cancel any previously scheduled notifications for this alarm concurrently
+  await cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds);
+
+  if (!alarm.isEnabled || latestScheduleTokenByAlarmId[alarm.id] !== token) {
+    return [];
+  }
+
+  const upcomingSteps = getUpcomingAlarmStepDates(alarm);
+  const stepsToSchedule = upcomingSteps.slice(0, MAX_SCHEDULED_STEPS_PER_ALARM);
+  const scheduledIds: string[] = [];
+
+  for (let offset = 0; offset < stepsToSchedule.length; offset += SCHEDULE_BATCH_CHUNK_SIZE) {
+    if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
+      // A newer schedule/cancel operation started for this alarm; clean up partial work
+      await Promise.all(
+        scheduledIds.map((id) =>
+          Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+        )
+      );
+      return [];
+    }
+
+    const chunk = stepsToSchedule.slice(offset, offset + SCHEDULE_BATCH_CHUNK_SIZE);
+    const chunkResults = await Promise.all(
+      chunk.map(async (step) => {
+        if ( step.date.getTime() <= Date.now() ) {
+          return null;
+        }
+
+        try {
+          if (alarm.type === 'single') {
+            return await Notifications.scheduleNotificationAsync({
+              content: {
+                title: alarm.label || 'Alarm',
+                body: 'Time to rise gently',
+                sound: ALARM_NOTIFICATION_SOUND,
+                categoryIdentifier: SINGLE_CATEGORY_ID,
+                priority: Notifications.AndroidNotificationPriority.MAX,
+                sticky: true,
+                autoDismiss: false,
+                interruptionLevel: 'critical',
+                data: {
+                  alarmId: alarm.id,
+                  type: 'single',
+                  stepIndex: 0,
+                  totalSteps: 1,
+                  timeString: step.timeString,
+                  cycleDateStr: step.cycleDateStr,
+                },
+              },
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.DATE,
+                date: step.date,
+                channelId: ALARM_CHANNEL_ID,
+                delivery: 'alarmClock',
+              },
+            });
+          }
+
+          const stepTitle = alarm.label
+            ? `${alarm.label} • ${step.stepIndex + 1} of ${step.totalSteps}`
+            : `Alarm • ${step.stepIndex + 1} of ${step.totalSteps}`;
+
+          return await Notifications.scheduleNotificationAsync({
+            content: {
+              title: stepTitle,
+              body: `${step.timeString} — Tap to wake or stop`,
+              sound: ALARM_NOTIFICATION_SOUND,
+              categoryIdentifier: INTERVAL_CATEGORY_ID,
+              priority: Notifications.AndroidNotificationPriority.MAX,
+              sticky: true,
+              autoDismiss: false,
+              interruptionLevel: 'critical',
+              data: {
+                alarmId: alarm.id,
+                type: alarm.type,
+                stepIndex: step.stepIndex,
+                totalSteps: step.totalSteps,
+                timeString: step.timeString,
+                cycleDateStr: step.cycleDateStr,
+              },
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: step.date,
+              channelId: ALARM_CHANNEL_ID,
+              delivery: 'alarmClock',
+            },
+          });
+        } catch (e) {
+          console.warn(`Error scheduling alarm step ${step.stepIndex}:`, e);
+          return null;
+        }
+      })
+    );
+
+    for (const id of chunkResults) {
+      if (id) {
+        scheduledIds.push(id);
+      }
     }
   }
 
-  const nextOccurrenceDate = calculateNextOccurrence(alarm);
-  const scheduledIds: string[] = [];
-
-  if (alarm.type === 'single') {
-    // Single Alarm
-    try {
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: alarm.label || 'Alarm',
-          body: 'Time to rise gently',
-          sound: ALARM_NOTIFICATION_SOUND,
-          categoryIdentifier: SINGLE_CATEGORY_ID,
-          data: {
-            alarmId: alarm.id,
-            type: 'single',
-            timeString: formatTime12h(alarm.startHour, alarm.startMinute),
-          },
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: nextOccurrenceDate,
-          channelId: ALARM_CHANNEL_ID,
-        },
-      });
-      scheduledIds.push(id);
-    } catch (e) {
-      console.warn('Error scheduling single alarm:', e);
-    }
-  } else if (alarm.type === 'offset') {
-    // Offset Alarm Sequence
-    const steps = generateOffsetSequence(
-      alarm.startHour,
-      alarm.startMinute,
-      alarm.offsetDirection || 'before',
-      alarm.alarmCount || 10,
-      alarm.intervalMinutes || 10
+  // Final check in case alarm was deleted/disabled while the last chunk was awaiting
+  if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
+    await Promise.all(
+      scheduledIds.map((id) =>
+        Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+      )
     );
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      // Mathematically exact step date based on sequence elapsed minutes
-      const stepDate = new Date(nextOccurrenceDate.getTime() + step.totalMinutesFromStart * 60 * 1000);
-
-      // Only schedule future steps
-      if (stepDate.getTime() > Date.now()) {
-        try {
-          const stepTitle = alarm.label
-            ? `${alarm.label} • ${i + 1} of ${steps.length}`
-            : `Alarm • ${i + 1} of ${steps.length}`;
-
-          const id = await Notifications.scheduleNotificationAsync({
-            content: {
-              title: stepTitle,
-              body: `${step.timeString} — Tap to wake or stop`,
-              sound: ALARM_NOTIFICATION_SOUND,
-              categoryIdentifier: INTERVAL_CATEGORY_ID,
-              data: {
-                alarmId: alarm.id,
-                type: 'offset',
-                stepIndex: i,
-                totalSteps: steps.length,
-                timeString: step.timeString,
-              },
-            },
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.DATE,
-              date: stepDate,
-              channelId: ALARM_CHANNEL_ID,
-            },
-          });
-          scheduledIds.push(id);
-        } catch (e) {
-          console.warn(`Error scheduling offset step ${i}:`, e);
-        }
-      }
-    }
-  } else {
-    // Window Interval Alarm Sequence
-    const steps = generateIntervalSequence(
-      alarm.startHour,
-      alarm.startMinute,
-      alarm.endHour ?? alarm.startHour,
-      alarm.endMinute ?? alarm.startMinute,
-      alarm.intervalMinutes ?? 10
-    );
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      // Mathematically exact step date based on sequence elapsed minutes
-      const stepDate = new Date(nextOccurrenceDate.getTime() + step.totalMinutesFromStart * 60 * 1000);
-
-      // Only schedule if in future
-      if (stepDate.getTime() > Date.now()) {
-        try {
-          const stepTitle = alarm.label
-            ? `${alarm.label} • ${i + 1} of ${steps.length}`
-            : `Alarm • ${i + 1} of ${steps.length}`;
-
-          const id = await Notifications.scheduleNotificationAsync({
-            content: {
-              title: stepTitle,
-              body: `${step.timeString} — Tap to wake or stop`,
-              sound: ALARM_NOTIFICATION_SOUND,
-              categoryIdentifier: INTERVAL_CATEGORY_ID,
-              data: {
-                alarmId: alarm.id,
-                type: 'interval',
-                stepIndex: i,
-                totalSteps: steps.length,
-                timeString: step.timeString,
-              },
-            },
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.DATE,
-              date: stepDate,
-              channelId: ALARM_CHANNEL_ID,
-            },
-          });
-          scheduledIds.push(id);
-        } catch (e) {
-          console.warn(`Error scheduling interval step ${i}:`, e);
-        }
-      }
-    }
+    return [];
   }
 
   return scheduledIds;
@@ -317,12 +367,17 @@ export async function scheduleSnoozeNotification(
 
   try {
     const triggerDate = new Date(Date.now() + minutes * 60 * 1000);
+    const categoryId = alarm.type === 'single' ? SINGLE_CATEGORY_ID : INTERVAL_CATEGORY_ID;
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: `${alarm.label || 'Alarm'} (Snoozed)`,
         body: 'Time to wake up gently',
         sound: ALARM_NOTIFICATION_SOUND,
-        categoryIdentifier: SINGLE_CATEGORY_ID,
+        categoryIdentifier: categoryId,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        sticky: true,
+        autoDismiss: false,
+        interruptionLevel: 'critical',
         data: {
           alarmId: alarm.id,
           type: alarm.type,
@@ -334,6 +389,7 @@ export async function scheduleSnoozeNotification(
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: triggerDate,
         channelId: ALARM_CHANNEL_ID,
+        delivery: 'alarmClock',
       },
     });
     return id;
@@ -351,11 +407,14 @@ export async function dismissPresentedNotificationsForAlarm(alarmId: string): Pr
 
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
-    for (const notif of presented) {
-      const data = notif.request?.content?.data;
-      if (data?.alarmId === alarmId) {
-        await Notifications.dismissNotificationAsync(notif.request.identifier);
-      }
+    const matchingIds = presented
+      .filter((notif) => notif.request?.content?.data?.alarmId === alarmId)
+      .map((notif) => notif.request.identifier);
+
+    if (matchingIds.length > 0) {
+      await Promise.all(
+        matchingIds.map((id) => Notifications.dismissNotificationAsync(id).catch(() => {}))
+      );
     }
   } catch (e) {
     console.warn('Error dismissing presented notifications:', e);
@@ -368,16 +427,11 @@ export async function dismissPresentedNotificationsForAlarm(alarmId: string): Pr
 export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem): Promise<void> {
   if (Platform.OS === 'web') return;
 
-  if (alarm.notificationIds && alarm.notificationIds.length > 0) {
-    for (const notifId of alarm.notificationIds) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(notifId);
-      } catch {}
-      try {
-        await Notifications.dismissNotificationAsync(notifId);
-      } catch {}
-    }
-  }
+  // Invalidate any in-flight scheduleAlarmsForAlarmItem call for this alarm immediately
+  nextAlarmScheduleToken(alarm.id);
 
-  await dismissPresentedNotificationsForAlarm(alarm.id);
+  await Promise.all([
+    cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds),
+    dismissPresentedNotificationsForAlarm(alarm.id),
+  ]);
 }

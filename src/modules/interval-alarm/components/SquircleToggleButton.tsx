@@ -9,11 +9,11 @@ interface SquircleToggleButtonProps {
   size?: number;
 }
 
-export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = ({
+export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = React.memo(function SquircleToggleButton({
   isEnabled,
   onToggle,
   size = 54,
-}) => {
+}) {
   const { colors, radii, shadows } = useTheme();
 
   const handlePress = () => {
@@ -51,7 +51,7 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = ({
       )}
     </TouchableOpacity>
   );
-};
+});
 
 const styles = StyleSheet.create({
   squircle: {

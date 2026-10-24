@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -7,20 +7,57 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Sun, Clock, Bell } from 'lucide-react-native';
+import { Sun, Clock, Bell, Volume2 } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
+import { useSettingsStore } from '../../../core/settings/settingsStore';
+import { useTranslation } from '../../../core/i18n/translations';
 import { useAlarmStore } from '../store/alarmStore';
 import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
+import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 export const AlarmRingingOverlay: React.FC = () => {
   const { colors, typography, radii, shadows } = useTheme();
+  const { t, language, formatNum } = useTranslation();
+  const defaultSnoozeMinutes = useSettingsStore((s) => s.defaultSnoozeMinutes);
+  const volumeButtonAction = useSettingsStore((s) => s.volumeButtonAction);
   const {
     activeRinging,
     dismissSingleAlarm,
+    dismissAllRemainingForToday,
     snoozeAlarm,
   } = useAlarmStore();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const isSequence = Boolean(
+    activeRinging &&
+      (activeRinging.alarm.type === 'interval' || activeRinging.alarm.type === 'offset')
+  );
+  const snoozeDuration =
+    activeRinging && isSequence && !activeRinging.alarm.isEscalating
+      ? activeRinging.alarm.intervalMinutes || defaultSnoozeMinutes || 10
+      : defaultSnoozeMinutes || 10;
+
+  const handleDismiss = useCallback(() => {
+    if (!activeRinging) return;
+    safeHaptics.notificationAsync(safeHaptics.NotificationFeedbackType.Success);
+    alarmSoundPlayer.finishLockScreenAlarmIfLocked();
+    void dismissSingleAlarm(activeRinging.alarm.id);
+  }, [activeRinging, dismissSingleAlarm]);
+
+  const handleDismissAllRemaining = useCallback(() => {
+    if (!activeRinging) return;
+    safeHaptics.notificationAsync(safeHaptics.NotificationFeedbackType.Success);
+    alarmSoundPlayer.finishLockScreenAlarmIfLocked();
+    void dismissAllRemainingForToday(activeRinging.alarm.id);
+  }, [activeRinging, dismissAllRemainingForToday]);
+
+  const handleSnooze = useCallback(() => {
+    if (!activeRinging) return;
+    safeHaptics.selectionAsync();
+    alarmSoundPlayer.finishLockScreenAlarmIfLocked();
+    void snoozeAlarm(activeRinging.alarm.id, snoozeDuration);
+  }, [activeRinging, snoozeAlarm, snoozeDuration]);
 
   useEffect(() => {
     if (activeRinging) {
@@ -42,33 +79,38 @@ export const AlarmRingingOverlay: React.FC = () => {
         ])
       );
       animation.start();
+
+      // Subscribe to hardware volume button press events
+      const removeVolumeListener = alarmSoundPlayer.addHardwareVolumeListener(() => {
+        if (volumeButtonAction === 'snooze') {
+          handleSnooze();
+        } else if (volumeButtonAction === 'dismiss') {
+          handleDismiss();
+        }
+      });
+
       return () => {
         animation.stop();
+        removeVolumeListener();
         alarmSoundPlayer.stopAlarmSound();
       };
     }
-  }, [activeRinging, pulseAnim]);
+  }, [activeRinging, pulseAnim, volumeButtonAction, handleSnooze, handleDismiss]);
 
   if (!activeRinging) return null;
 
-  const isInterval = activeRinging.alarm.type === 'interval';
-  const snoozeDuration = activeRinging.alarm.intervalMinutes || 10;
-
-  const handleDismiss = () => {
-    alarmSoundPlayer.stopAlarmSound();
-    dismissSingleAlarm(activeRinging.alarm.id);
-  };
-
-  const handleSnooze = () => {
-    alarmSoundPlayer.stopAlarmSound();
-    snoozeAlarm(activeRinging.alarm.id, snoozeDuration);
-  };
-
   const currentStep = activeRinging.currentStepIndex ?? 0;
   const totalSteps = activeRinging.totalSteps ?? 1;
+  const hasRemainingSteps = isSequence && currentStep + 1 < totalSteps;
 
   return (
-    <Modal visible={true} animationType="fade" transparent={false}>
+    <Modal
+      visible={true}
+      animationType="fade"
+      transparent={false}
+      statusBarTranslucent={true}
+      onRequestClose={handleSnooze}
+    >
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Top Header */}
         <View style={styles.topHeader}>
@@ -80,7 +122,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                 { color: colors.textPrimary, fontFamily: typography.numbersBold },
               ]}
             >
-              Alarm
+              {t.ringingNow}
             </Text>
           </View>
         </View>
@@ -91,7 +133,7 @@ export const AlarmRingingOverlay: React.FC = () => {
             style={[
               styles.pulseCircle,
               {
-                borderColor: 'rgba(255, 255, 255, 0.08)',
+                borderColor: colors.surfaceBorder,
                 transform: [{ scale: pulseAnim }],
               },
             ]}
@@ -100,7 +142,7 @@ export const AlarmRingingOverlay: React.FC = () => {
               style={[
                 styles.innerPulseCircle,
                 {
-                  borderColor: 'rgba(255, 255, 255, 0.16)',
+                  borderColor: colors.surfaceBorderHighlight,
                   backgroundColor: colors.surfaceElevated,
                 },
               ]}
@@ -114,7 +156,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                   },
                 ]}
               >
-                {activeRinging.currentTimeString}
+                {formatNum(activeRinging.currentTimeString)}
               </Text>
             </View>
           </Animated.View>
@@ -131,15 +173,48 @@ export const AlarmRingingOverlay: React.FC = () => {
               </Text>
             ) : null}
 
-            {isInterval && (
+            {isSequence && (
               <Text
                 style={[
                   styles.stepCounterText,
                   { color: colors.accent, fontFamily: typography.numbersBold },
                 ]}
               >
-                Alarm {currentStep + 1} of {totalSteps}
+                {t.alarmsActiveOfTotal(currentStep + 1, totalSteps)}
               </Text>
+            )}
+
+            {volumeButtonAction !== 'none' && (
+              <View
+                style={[
+                  styles.volumeHintPill,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.surfaceBorder,
+                    borderRadius: radii.pill,
+                  },
+                ]}
+              >
+                <Volume2 size={12} color={colors.textSecondary} />
+                <Text
+                  style={[
+                    styles.volumeHintText,
+                    { color: colors.textSecondary, fontFamily: typography.sansMedium },
+                  ]}
+                >
+                  {language === 'bn'
+                    ? `ভলিউম বাটন: ${
+                        volumeButtonAction === 'snooze'
+                          ? t.volumeActionSnooze
+                          : t.volumeActionDismiss
+                      }`
+                    : `Volume button: ${
+                        volumeButtonAction === 'snooze'
+                          ? t.volumeActionSnooze
+                          : t.volumeActionDismiss
+                      }`}
+                </Text>
+              </View>
             )}
           </View>
         </View>
@@ -167,7 +242,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                   { color: colors.textSecondary, fontFamily: typography.numbersBold },
                 ]}
               >
-                {`SNOOZE (${snoozeDuration}M)`}
+                {t.snoozeBtn(snoozeDuration).toUpperCase()}
               </Text>
             </TouchableOpacity>
 
@@ -192,10 +267,36 @@ export const AlarmRingingOverlay: React.FC = () => {
                   { color: '#FFFFFF', fontFamily: typography.numbersBold },
                 ]}
               >
-                STOP
+                {t.dismissAlarmBtn.toUpperCase()}
               </Text>
             </TouchableOpacity>
           </View>
+
+          {hasRemainingSteps && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleDismissAllRemaining}
+              style={[
+                styles.dismissAllBtn,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.surfaceBorder,
+                  borderRadius: radii.buttonMedium,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.dismissAllBtnText,
+                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                ]}
+              >
+                {language === 'bn'
+                  ? 'আজকের বাকি সব অ্যালার্ম বন্ধ করুন'
+                  : 'DISMISS ALL REMAINING TODAY'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Modal>
@@ -262,6 +363,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     letterSpacing: 0.5,
   },
+  volumeHintPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    marginTop: 6,
+  },
+  volumeHintText: {
+    fontSize: 11.5,
+  },
   actionsSection: {
     width: '100%',
     paddingHorizontal: 20,
@@ -287,5 +400,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginTop: 8,
     textAlign: 'center',
+  },
+  dismissAllBtn: {
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  dismissAllBtnText: {
+    fontSize: 12,
+    letterSpacing: 0.6,
   },
 });

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../../../core/theme';
 import { useAlarmStore } from '../store/alarmStore';
+import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface AlarmToastBannerProps {
   bottomOffset?: number;
@@ -21,8 +22,10 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
   bottomOffset = 92,
   horizontalMargin = 16,
 }) => {
-  const { colors, typography, radii, shadows } = useTheme();
+  const { colors, typography, radii, shadows, themeMode } = useTheme();
   const toastMessage = useAlarmStore((s) => s.toastMessage);
+  const toastActionLabel = useAlarmStore((s) => s.toastActionLabel);
+  const onToastAction = useAlarmStore((s) => s.onToastAction);
   const hideToast = useAlarmStore((s) => s.hideToast);
 
   const [fadeAnim] = useState(() => new Animated.Value(0));
@@ -69,9 +72,10 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
         }),
       ]).start();
 
+      const durationMs = toastActionLabel ? 5000 : 3500;
       timerRef.current = setTimeout(() => {
         handleDismiss();
-      }, 3500);
+      }, durationMs);
     }
 
     return () => {
@@ -79,7 +83,7 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
         clearTimeout(timerRef.current);
       }
     };
-  }, [toastMessage, handleDismiss, fadeAnim, translateYAnim]);
+  }, [toastMessage, toastActionLabel, handleDismiss, fadeAnim, translateYAnim]);
 
   if (!toastMessage) {
     return null;
@@ -87,6 +91,18 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
 
   // Parse "Alarm set for <time> from now" to highlight <time> only with accent color
   const match = toastMessage.match(/^(Alarm set for\s+)(.+?)(\s+from now)$/i);
+
+  const handleActionPress = () => {
+    safeHaptics.selectionAsync();
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    if (onToastAction) {
+      onToastAction();
+    } else {
+      handleDismiss();
+    }
+  };
 
   return (
     <View
@@ -105,53 +121,84 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
           styles.toastCard,
           shadows.card,
           {
-            backgroundColor: '#DCDCE0',
-            borderColor: 'rgba(0, 0, 0, 0.08)',
+            backgroundColor: themeMode === 'light' ? '#FFFFFF' : '#DCDCE0',
+            borderColor:
+              themeMode === 'light' ? colors.surfaceBorder : 'rgba(0, 0, 0, 0.08)',
             borderRadius: radii.button,
             opacity: fadeAnim,
             transform: [{ translateY: translateYAnim }],
           },
         ]}
       >
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={handleDismiss}
-          style={styles.touchableContent}
-          accessibilityRole="alert"
-          accessibilityLabel={toastMessage}
-        >
-          {match ? (
-            <Text
-              style={[
-                styles.toastText,
-                {
-                  color: '#18181B',
-                  fontFamily: typography.numbersBold,
-                },
-              ]}
-              numberOfLines={2}
-            >
-              {match[1]}
-              <Text style={{ color: colors.accent, fontFamily: typography.numbersBold }}>
-                {match[2]}
+        <View style={styles.rowContainer}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={handleDismiss}
+            style={styles.touchableContent}
+            accessibilityRole="alert"
+            accessibilityLabel={toastMessage}
+          >
+            {match ? (
+              <Text
+                style={[
+                  styles.toastText,
+                  {
+                    color: '#18181B',
+                    fontFamily: typography.numbersBold,
+                  },
+                ]}
+                numberOfLines={2}
+              >
+                {match[1]}
+                <Text style={{ color: colors.accent, fontFamily: typography.numbersBold }}>
+                  {match[2]}
+                </Text>
+                {match[3]}
               </Text>
-              {match[3]}
-            </Text>
-          ) : (
-            <Text
+            ) : (
+              <Text
+                style={[
+                  styles.toastText,
+                  {
+                    color: '#18181B',
+                    fontFamily: typography.numbersBold,
+                  },
+                ]}
+                numberOfLines={2}
+              >
+                {toastMessage}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          {toastActionLabel && (
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={handleActionPress}
               style={[
-                styles.toastText,
+                styles.actionButton,
                 {
-                  color: '#18181B',
-                  fontFamily: typography.numbersBold,
+                  backgroundColor: colors.accent,
+                  borderRadius: radii.pill,
                 },
               ]}
-              numberOfLines={2}
+              accessibilityRole="button"
+              accessibilityLabel={toastActionLabel}
             >
-              {toastMessage}
-            </Text>
+              <Text
+                style={[
+                  styles.actionButtonText,
+                  {
+                    color: '#FFFFFF',
+                    fontFamily: typography.sansBold,
+                  },
+                ]}
+              >
+                {toastActionLabel}
+              </Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+        </View>
       </Animated.View>
     </View>
   );
@@ -167,7 +214,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  rowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 12,
+  },
   touchableContent: {
+    flex: 1,
     paddingVertical: 13,
     paddingHorizontal: 16,
   },
@@ -175,5 +229,14 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     lineHeight: 18,
     letterSpacing: 0.1,
+  },
+  actionButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginLeft: 8,
+  },
+  actionButtonText: {
+    fontSize: 12,
+    letterSpacing: 0.6,
   },
 });
