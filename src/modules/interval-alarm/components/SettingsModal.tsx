@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   ScrollView,
   Pressable,
   TextInput,
+  Animated,
+  Platform,
+  Linking,
 } from 'react-native';
 import {
   X,
@@ -24,6 +27,7 @@ import {
   ShieldCheck,
   Volume2,
   Tag,
+  Code,
 } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import {
@@ -32,6 +36,7 @@ import {
   VolumeButtonAction,
 } from '../../../core/settings/settingsStore';
 import { useTranslation } from '../../../core/i18n/translations';
+import { useSheetModalGesture } from './useSheetModalGesture';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface SettingsModalProps {
@@ -41,6 +46,8 @@ interface SettingsModalProps {
 
 const EARLY_DISMISS_WINDOWS = [15, 30, 45, 60];
 const SNOOZE_PRESETS = [5, 10, 15];
+const PROJECT_GIT_URL = 'https://github.com/RaufunNazin/Alarming';
+const useNativeDriver = Platform.OS !== 'web';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const { colors, typography, radii, shadows, themeMode } = useTheme();
@@ -56,6 +63,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
   const [alarmTypeModalVisible, setAlarmTypeModalVisible] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [activeTooltipKey, setActiveTooltipKey] = useState<string | null>(null);
+
+  const tooltipOpacity = useRef(new Animated.Value(0)).current;
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const justPressedHelpRef = useRef(false);
+
+  const {
+    translateY: sheetTranslateY,
+    keyboardHeight,
+    dragHandlePanHandlers,
+  } = useSheetModalGesture(visible, onClose);
+
+  const alarmTypeSheetGesture = useSheetModalGesture(
+    alarmTypeModalVisible,
+    () => setAlarmTypeModalVisible(false)
+  );
+
+  const clearTooltipTimer = useCallback(() => {
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissTooltip = useCallback(() => {
+    clearTooltipTimer();
+    setActiveTooltipKey(null);
+  }, [clearTooltipTimer]);
+
+  const toggleTooltip = useCallback(
+    (key: string) => {
+      safeHaptics.selectionAsync();
+      clearTooltipTimer();
+
+      if (activeTooltipKey === key) {
+        setActiveTooltipKey(null);
+        return;
+      }
+
+      tooltipOpacity.setValue(1);
+      setActiveTooltipKey(key);
+
+      tooltipTimerRef.current = setTimeout(() => {
+        Animated.timing(tooltipOpacity, {
+          toValue: 0,
+          duration: 240,
+          useNativeDriver,
+        }).start(({ finished }) => {
+          if (finished) {
+            setActiveTooltipKey((curr) => (curr === key ? null : curr));
+          }
+        });
+      }, 5000);
+    },
+    [activeTooltipKey, clearTooltipTimer, tooltipOpacity]
+  );
+
+  useEffect(() => {
+    if (!visible) {
+      dismissTooltip();
+    }
+    return () => clearTooltipTimer();
+  }, [visible, dismissTooltip, clearTooltipTimer]);
 
   const handleSelectAlarmType = (mode: IntervalModeType) => {
     safeHaptics.selectionAsync();
@@ -69,6 +139,71 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
     safeHaptics.selectionAsync();
     void addCategory(trimmed);
     setNewCategoryInput('');
+  };
+
+  const renderHelpIcon = (tooltipKey: string) => {
+    const isActive = activeTooltipKey === tooltipKey;
+    return (
+      <TouchableOpacity
+        activeOpacity={0.75}
+        onPressIn={() => {
+          justPressedHelpRef.current = true;
+        }}
+        onPress={() => {
+          toggleTooltip(tooltipKey);
+          setTimeout(() => {
+            justPressedHelpRef.current = false;
+          }, 50);
+        }}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={[
+          styles.helpBadgeBtn,
+          {
+            backgroundColor: isActive ? colors.primary : controlBg,
+            borderColor: isActive ? colors.primary : colors.surfaceBorder,
+            borderRadius: radii.chipInner,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.helpBadgeText,
+            {
+              color: isActive ? '#FFFFFF' : colors.textSecondary,
+              fontFamily: typography.sansBold,
+            },
+          ]}
+        >
+          ?
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderTooltipBox = (tooltipKey: string, text: string) => {
+    if (activeTooltipKey !== tooltipKey) return null;
+    return (
+      <Animated.View
+        style={[
+          styles.tooltipBox,
+          {
+            opacity: tooltipOpacity,
+            backgroundColor: isLight ? colors.surface : colors.background,
+            borderColor: colors.primary + '55',
+            borderRadius: radii.chip,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.tooltipText,
+            { color: colors.textSecondary, fontFamily: typography.sansRegular },
+          ]}
+        >
+          {text}
+        </Text>
+      </Animated.View>
+    );
   };
 
   const renderSquircleToggle = (value: boolean, onToggle: (next: boolean) => void) => (
@@ -94,6 +229,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
           styles.squircleSwitchThumb,
           {
             backgroundColor: value ? '#FFFFFF' : colors.textMuted,
+            borderRadius: radii.chipInner,
             transform: [{ translateX: value ? 20 : 0 }],
           },
         ]}
@@ -116,52 +252,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={[styles.backdrop, { backgroundColor: colors.overlayBackdrop }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      <View
+        style={[
+          styles.backdrop,
+          {
+            backgroundColor: colors.overlayBackdrop,
+            paddingBottom: keyboardHeight,
+          },
+        ]}
+      >
+        <Pressable
+          style={styles.backdropDismissArea}
+          onPress={() => {
+            if (activeTooltipKey) {
+              dismissTooltip();
+            }
+            onClose();
+          }}
+        />
 
-        <View
+        <Animated.View
+          onTouchEnd={() => {
+            if (activeTooltipKey && !justPressedHelpRef.current) {
+              dismissTooltip();
+            }
+          }}
           style={[
             styles.sheet,
             shadows.modal,
             {
               backgroundColor: sheetBg,
               borderColor: colors.surfaceBorder,
-              borderRadius: radii.card,
+              borderTopLeftRadius: radii.modalOuter,
+              borderTopRightRadius: radii.modalOuter,
+              transform: [{ translateY: sheetTranslateY }],
             },
           ]}
         >
-          {/* Top Bar */}
-          <View style={styles.topBar}>
-            <Text
+          {/* Top Drag Handle Bar (no "Settings" text or close button, matches other modals) */}
+          <View {...dragHandlePanHandlers} style={styles.dragHandleArea}>
+            <View
               style={[
-                styles.sheetTitle,
-                { color: colors.textPrimary, fontFamily: typography.sansBold },
-              ]}
-            >
-              {t.settingsTitle}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                safeHaptics.selectionAsync();
-                onClose();
-              }}
-              style={[
-                styles.closeBtn,
+                styles.dragHandleBar,
                 {
-                  backgroundColor: cardBg,
-                  borderColor: colors.surfaceBorder,
-                  borderWidth: isLight ? 1 : 0,
-                  borderRadius: radii.pill,
+                  backgroundColor: colors.surfaceBorder,
+                  borderRadius: radii.handle,
                 },
               ]}
-            >
-              <X size={18} color={colors.textPrimary} />
-            </TouchableOpacity>
+            />
           </View>
 
           <ScrollView
+            style={styles.scrollArea}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            onScrollBeginDrag={() => {
+              if (activeTooltipKey) {
+                dismissTooltip();
+              }
+            }}
           >
             {/* 1. APPEARANCE & LANGUAGE */}
             <Text
@@ -182,180 +333,192 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              {/* Theme Switcher */}
-              <View style={styles.rowItem}>
-                <View style={styles.rowLabelWithIcon}>
-                  {settings.themeMode === 'dark' ? (
-                    <Moon size={18} color={colors.primary} />
-                  ) : (
-                    <Sun size={18} color={colors.primary} />
-                  )}
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.themeLabel}
-                  </Text>
-                </View>
+              {/* Theme Switcher (Has Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelWithIcon}>
+                    {settings.themeMode === 'dark' ? (
+                      <Moon size={17} color={colors.primary} />
+                    ) : (
+                      <Sun size={17} color={colors.primary} />
+                    )}
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.themeLabel}
+                    </Text>
+                    {renderHelpIcon('theme')}
+                  </View>
 
-                <View
-                  style={[
-                    styles.segmentedPill,
-                    {
-                      backgroundColor: controlBg,
-                      borderColor: colors.surfaceBorder,
-                      borderRadius: radii.button,
-                    },
-                  ]}
-                >
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ themeMode: 'dark' });
-                    }}
+                  <View
                     style={[
-                      styles.segmentOption,
-                      settings.themeMode === 'dark' && {
-                        backgroundColor: colors.primary,
+                      styles.segmentedPill,
+                      {
+                        backgroundColor: controlBg,
+                        borderColor: colors.surfaceBorder,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
-                    <Text
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ themeMode: 'dark' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.themeMode === 'dark'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.themeMode === 'dark' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.themeDark}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ themeMode: 'light' });
-                    }}
-                    style={[
-                      styles.segmentOption,
-                      settings.themeMode === 'light' && {
-                        backgroundColor: colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.themeMode === 'dark'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.themeDark}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ themeMode: 'light' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.themeMode === 'light'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.themeMode === 'light' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.themeLight}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.themeMode === 'light'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.themeLight}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('theme', t.tooltipTheme)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Language Switcher */}
-              <View style={styles.rowItem}>
-                <View style={styles.rowLabelWithIcon}>
-                  <Globe size={18} color={colors.primary} />
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.languageLabel}
-                  </Text>
-                </View>
+              {/* Language Switcher (Has Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelWithIcon}>
+                    <Globe size={17} color={colors.primary} />
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.languageLabel}
+                    </Text>
+                    {renderHelpIcon('language')}
+                  </View>
 
-                <View
-                  style={[
-                    styles.segmentedPill,
-                    {
-                      backgroundColor: controlBg,
-                      borderColor: colors.surfaceBorder,
-                      borderRadius: radii.button,
-                    },
-                  ]}
-                >
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ language: 'en' });
-                    }}
+                  <View
                     style={[
-                      styles.segmentOption,
-                      settings.language === 'en' && {
-                        backgroundColor: colors.primary,
+                      styles.segmentedPill,
+                      {
+                        backgroundColor: controlBg,
+                        borderColor: colors.surfaceBorder,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
-                    <Text
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ language: 'en' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.language === 'en'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.language === 'en' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.langEnglish}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ language: 'bn' });
-                    }}
-                    style={[
-                      styles.segmentOption,
-                      settings.language === 'bn' && {
-                        backgroundColor: colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.language === 'en'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.langEnglish}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ language: 'bn' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.language === 'bn'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.language === 'bn' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.langBangla}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.language === 'bn'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.langBangla}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('language', t.tooltipLanguage)}
               </View>
             </View>
 
-            {/* 2. SAFETY, SLEEP CHECKS & HARDWARE BUTTONS */}
+            {/* 2. SAFETY & CONTROLS (All have Icons) */}
             <Text
               style={[
                 styles.sectionHeader,
@@ -374,11 +537,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              {/* Pre-Sleep Safety Check Banner Toggle */}
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleTextCol}>
+              {/* System & Permission Check Icon Toggle (Has Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
                   <View style={styles.rowLabelWithIcon}>
-                    <ShieldCheck size={16} color={colors.accent} />
+                    <ShieldCheck size={17} color={colors.accent} />
                     <Text
                       style={[
                         styles.rowTitle,
@@ -387,27 +550,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                     >
                       {t.toggleSafetyCheckTitle}
                     </Text>
+                    {renderHelpIcon('safetyCheck')}
                   </View>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {t.toggleSafetyCheckDesc}
-                  </Text>
+                  {renderSquircleToggle(settings.enableSafetyCheckBanner, (val) =>
+                    void updateSettings({ enableSafetyCheckBanner: val })
+                  )}
                 </View>
-                {renderSquircleToggle(settings.enableSafetyCheckBanner, (val) =>
-                  void updateSettings({ enableSafetyCheckBanner: val })
-                )}
+                {renderTooltipBox('safetyCheck', t.tooltipSafetyCheck)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Hardware Volume Buttons Configuration */}
+              {/* Hardware Volume Buttons Configuration (Has Icon) */}
               <View style={styles.columnItem}>
                 <View style={styles.rowLabelWithIcon}>
-                  <Volume2 size={16} color={colors.accent} />
+                  <Volume2 size={17} color={colors.accent} />
                   <Text
                     style={[
                       styles.rowTitle,
@@ -416,15 +573,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                   >
                     {t.volumeButtonActionLabel}
                   </Text>
+                  {renderHelpIcon('volumeButtons')}
                 </View>
-                <Text
-                  style={[
-                    styles.rowDesc,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                  ]}
-                >
-                  {t.volumeButtonActionDesc}
-                </Text>
+                {renderTooltipBox('volumeButtons', t.tooltipVolumeButtons)}
 
                 <View style={styles.chipsRow}>
                   {volumeActions.map((opt) => {
@@ -446,7 +597,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                             borderColor: isSelected
                               ? colors.accent
                               : colors.surfaceBorder,
-                            borderRadius: radii.button,
+                            borderRadius: radii.chip,
                           },
                         ]}
                       >
@@ -471,24 +622,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Early Dismissal ("I'm Already Awake") Window */}
+              {/* Early Wake-Up Window (Has Icon) */}
               <View style={styles.columnItem}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.earlyDismissWindowLabel}
-                </Text>
-                <Text
-                  style={[
-                    styles.rowDesc,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                  ]}
-                >
-                  {t.earlyDismissWindowDesc}
-                </Text>
+                <View style={styles.rowLabelWithIcon}>
+                  <Sun size={17} color={colors.accent} />
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                    ]}
+                  >
+                    {t.earlyDismissWindowLabel}
+                  </Text>
+                  {renderHelpIcon('earlyDismiss')}
+                </View>
+                {renderTooltipBox('earlyDismiss', t.tooltipEarlyDismiss)}
 
                 <View style={styles.chipsRow}>
                   {EARLY_DISMISS_WINDOWS.map((mins) => {
@@ -510,7 +658,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                             borderColor: isSelected
                               ? colors.accent
                               : colors.surfaceBorder,
-                            borderRadius: radii.button,
+                            borderRadius: radii.chip,
                           },
                         ]}
                       >
@@ -534,7 +682,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               </View>
             </View>
 
-            {/* 3. CATEGORIES MANAGEMENT */}
+            {/* 3. CATEGORIES MANAGEMENT (Has Icon) */}
             <Text
               style={[
                 styles.sectionHeader,
@@ -554,19 +702,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.rowDesc,
-                  {
-                    color: colors.textSecondary,
-                    fontFamily: typography.sansRegular,
-                    marginTop: 0,
-                    marginBottom: 10,
-                  },
-                ]}
-              >
-                {t.manageCategoriesDesc}
-              </Text>
+              <View style={[styles.rowLabelWithIcon, { marginBottom: 10 }]}>
+                <Tag size={16} color={colors.accent} />
+                <Text
+                  style={[
+                    styles.rowTitle,
+                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                  ]}
+                >
+                  {t.sectionCategories}
+                </Text>
+                {renderHelpIcon('categories')}
+              </View>
+              {renderTooltipBox('categories', t.tooltipCategories)}
 
               <View style={styles.categoryWrapRow}>
                 {settings.categories.map((cat) => (
@@ -577,7 +725,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                       {
                         backgroundColor: controlBg,
                         borderColor: colors.surfaceBorder,
-                        borderRadius: radii.pill,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
@@ -616,7 +764,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                       backgroundColor: controlBg,
                       borderColor: colors.surfaceBorder,
                       color: colors.textPrimary,
-                      borderRadius: radii.button,
+                      borderRadius: radii.chip,
                       fontFamily: typography.sansRegular,
                     },
                   ]}
@@ -628,7 +776,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                     styles.addCategoryBtn,
                     {
                       backgroundColor: colors.accent,
-                      borderRadius: radii.button,
+                      borderRadius: radii.chip,
                     },
                   ]}
                 >
@@ -645,7 +793,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               </View>
             </View>
 
-            {/* 4. INTERVAL ALARM SYSTEM (WITH MODAL SELECTOR) */}
+            {/* 4. MULTI-ALARM SPACING STYLE (Has Icon) */}
             <Text
               style={[
                 styles.sectionHeader,
@@ -654,14 +802,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             >
               {t.sectionAlarmType}
             </Text>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
-                safeHaptics.selectionAsync();
-                setAlarmTypeModalVisible(true);
-              }}
+            <View
               style={[
-                styles.alarmTypeSelectorCard,
+                styles.cardGroup,
                 {
                   backgroundColor: cardBg,
                   borderColor:
@@ -669,57 +812,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                       ? colors.primary
                       : colors.surfaceBorder,
                   borderRadius: radii.cardInner,
+                  padding: 14,
                 },
               ]}
             >
-              <View style={styles.alarmTypeLeft}>
-                <View
-                  style={[
-                    styles.alarmTypeIconBox,
-                    { backgroundColor: colors.primaryMuted },
-                  ]}
-                >
-                  {settings.intervalModeType === 'escalating' ? (
-                    <Flame size={20} color={colors.primary} />
-                  ) : (
-                    <Sliders size={20} color={colors.primary} />
-                  )}
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => {
+                  safeHaptics.selectionAsync();
+                  setAlarmTypeModalVisible(true);
+                }}
+                style={styles.alarmTypeRow}
+              >
+                <View style={styles.alarmTypeLeft}>
+                  <View
+                    style={[
+                      styles.alarmTypeIconBox,
+                      { backgroundColor: colors.primaryMuted, borderRadius: radii.chip },
+                    ]}
+                  >
+                    {settings.intervalModeType === 'escalating' ? (
+                      <Flame size={20} color={colors.primary} />
+                    ) : (
+                      <Sliders size={20} color={colors.primary} />
+                    )}
+                  </View>
+                  <View style={styles.alarmTypeTextCol}>
+                    <View style={styles.rowLabelWithIcon}>
+                      <Text
+                        style={[
+                          styles.rowTitle,
+                          { color: colors.textPrimary, fontFamily: typography.sansBold },
+                        ]}
+                      >
+                        {t.intervalAlarmTypeLabel}
+                      </Text>
+                      {renderHelpIcon('alarmType')}
+                    </View>
+                    <Text
+                      style={[
+                        styles.alarmTypeSubText,
+                        { color: colors.primaryLight, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {settings.intervalModeType === 'escalating'
+                        ? t.typeEscalatingTitle
+                        : t.typeStandardTitle}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.alarmTypeTextCol}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansBold },
-                    ]}
-                  >
-                    {t.intervalAlarmTypeLabel}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.alarmTypeSubText,
-                      { color: colors.primaryLight, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {settings.intervalModeType === 'escalating'
-                      ? t.typeEscalatingTitle
-                      : t.typeStandardTitle}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {settings.intervalModeType === 'escalating'
-                      ? t.typeEscalatingDesc
-                      : t.typeStandardDesc}
-                  </Text>
-                </View>
-              </View>
-              <ChevronRight size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
+                <ChevronRight size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              {renderTooltipBox('alarmType', t.tooltipAlarmType)}
+            </View>
 
-            {/* 5. DEFAULT TIMES & STEPS */}
+            {/* 5. DEFAULT TIMES (NO ICONS per user requirement) */}
             <Text
               style={[
                 styles.sectionHeader,
@@ -738,17 +885,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              {/* Default Snooze Time with Quick Presets (5m, 10m, 15m) + Stepper */}
+              {/* Default Snooze Time (No Icon) */}
               <View style={styles.columnItem}>
                 <View style={styles.rowBetween}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.defaultSnoozeLabel}
-                  </Text>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultSnoozeLabel}
+                    </Text>
+                    {renderHelpIcon('defaultSnooze')}
+                  </View>
                   <View style={styles.stepperGroup}>
                     <TouchableOpacity
                       onPress={() => {
@@ -760,7 +910,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                           ),
                         });
                       }}
-                      style={[styles.stepBtn, { backgroundColor: controlBg }]}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
                     >
                       <Minus size={14} color={colors.textPrimary} />
                     </TouchableOpacity>
@@ -782,12 +935,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                           ),
                         });
                       }}
-                      style={[styles.stepBtn, { backgroundColor: controlBg }]}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
                     >
                       <Plus size={14} color={colors.textPrimary} />
                     </TouchableOpacity>
                   </View>
                 </View>
+                {renderTooltipBox('defaultSnooze', t.tooltipDefaultSnooze)}
 
                 <View style={styles.chipsRow}>
                   {SNOOZE_PRESETS.map((mins) => {
@@ -809,7 +966,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                             borderColor: isSelected
                               ? colors.accent
                               : colors.surfaceBorder,
-                            borderRadius: radii.button,
+                            borderRadius: radii.chip,
                           },
                         ]}
                       >
@@ -834,303 +991,359 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Default Interval Minutes (disabled when escalating is active) */}
+              {/* Default Interval Minutes (No Icon) */}
               <View
                 style={[
-                  styles.rowItem,
+                  styles.columnItem,
                   settings.intervalModeType === 'escalating' && { opacity: 0.45 },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.defaultIntervalLabel}
-                </Text>
-                <View style={styles.stepperGroup}>
-                  <TouchableOpacity
-                    disabled={settings.intervalModeType === 'escalating'}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultIntervalMinutes: Math.max(
-                          1,
-                          settings.defaultIntervalMinutes - 1
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Minus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.stepValText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {t.nMin(settings.defaultIntervalMinutes)}
-                  </Text>
-                  <TouchableOpacity
-                    disabled={settings.intervalModeType === 'escalating'}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultIntervalMinutes: Math.min(
-                          60,
-                          settings.defaultIntervalMinutes + 1
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Plus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultIntervalLabel}
+                    </Text>
+                    {renderHelpIcon('defaultInterval')}
+                  </View>
+                  <View style={styles.stepperGroup}>
+                    <TouchableOpacity
+                      disabled={settings.intervalModeType === 'escalating'}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultIntervalMinutes: Math.max(
+                            1,
+                            settings.defaultIntervalMinutes - 1
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Minus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.stepValText,
+                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      ]}
+                    >
+                      {t.nMin(settings.defaultIntervalMinutes)}
+                    </Text>
+                    <TouchableOpacity
+                      disabled={settings.intervalModeType === 'escalating'}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultIntervalMinutes: Math.min(
+                            60,
+                            settings.defaultIntervalMinutes + 1
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Plus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('defaultInterval', t.tooltipDefaultInterval)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Default Steps Count (disabled when escalating is active) */}
+              {/* Default Steps Count (No Icon) */}
               <View
                 style={[
-                  styles.rowItem,
+                  styles.columnItem,
                   settings.intervalModeType === 'escalating' && { opacity: 0.45 },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.defaultStepsLabel}
-                </Text>
-                <View style={styles.stepperGroup}>
-                  <TouchableOpacity
-                    disabled={settings.intervalModeType === 'escalating'}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultAlarmCount: Math.max(2, settings.defaultAlarmCount - 1),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Minus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.stepValText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {formatNum(settings.defaultAlarmCount)}
-                  </Text>
-                  <TouchableOpacity
-                    disabled={settings.intervalModeType === 'escalating'}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultAlarmCount: Math.min(30, settings.defaultAlarmCount + 1),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Plus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultStepsLabel}
+                    </Text>
+                    {renderHelpIcon('defaultSteps')}
+                  </View>
+                  <View style={styles.stepperGroup}>
+                    <TouchableOpacity
+                      disabled={settings.intervalModeType === 'escalating'}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultAlarmCount: Math.max(2, settings.defaultAlarmCount - 1),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Minus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.stepValText,
+                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      ]}
+                    >
+                      {formatNum(settings.defaultAlarmCount)}
+                    </Text>
+                    <TouchableOpacity
+                      disabled={settings.intervalModeType === 'escalating'}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultAlarmCount: Math.min(30, settings.defaultAlarmCount + 1),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Plus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('defaultSteps', t.tooltipDefaultSteps)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Default Window Duration */}
-              <View style={styles.rowItem}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.defaultWindowDurationLabel}
-                </Text>
-                <View style={styles.stepperGroup}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultWindowDurationMinutes: Math.max(
-                          15,
-                          settings.defaultWindowDurationMinutes - 15
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Minus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.stepValText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {t.nMin(settings.defaultWindowDurationMinutes)}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultWindowDurationMinutes: Math.min(
-                          240,
-                          settings.defaultWindowDurationMinutes + 15
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Plus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
+              {/* Default Window Duration (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultWindowDurationLabel}
+                    </Text>
+                    {renderHelpIcon('defaultWindow')}
+                  </View>
+                  <View style={styles.stepperGroup}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultWindowDurationMinutes: Math.max(
+                            15,
+                            settings.defaultWindowDurationMinutes - 15
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Minus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.stepValText,
+                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      ]}
+                    >
+                      {t.nMin(settings.defaultWindowDurationMinutes)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultWindowDurationMinutes: Math.min(
+                            240,
+                            settings.defaultWindowDurationMinutes + 15
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Plus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('defaultWindow', t.tooltipDefaultWindow)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Default Offset Direction */}
-              <View style={styles.rowItem}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.defaultDirectionLabel}
-                </Text>
-                <View
-                  style={[
-                    styles.segmentedPill,
-                    {
-                      backgroundColor: controlBg,
-                      borderColor: colors.surfaceBorder,
-                      borderRadius: radii.button,
-                    },
-                  ]}
-                >
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ defaultOffsetDirection: 'before' });
-                    }}
+              {/* Default Offset Direction (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultDirectionLabel}
+                    </Text>
+                    {renderHelpIcon('defaultDirection')}
+                  </View>
+                  <View
                     style={[
-                      styles.segmentOption,
-                      settings.defaultOffsetDirection === 'before' && {
-                        backgroundColor: colors.primary,
+                      styles.segmentedPill,
+                      {
+                        backgroundColor: controlBg,
+                        borderColor: colors.surfaceBorder,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
-                    <Text
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ defaultOffsetDirection: 'before' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.defaultOffsetDirection === 'before'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.defaultOffsetDirection === 'before' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.before}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({ defaultOffsetDirection: 'after' });
-                    }}
-                    style={[
-                      styles.segmentOption,
-                      settings.defaultOffsetDirection === 'after' && {
-                        backgroundColor: colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.defaultOffsetDirection === 'before'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.before}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({ defaultOffsetDirection: 'after' });
+                      }}
                       style={[
-                        styles.segmentOptionText,
-                        {
-                          color:
-                            settings.defaultOffsetDirection === 'after'
-                              ? '#FFFFFF'
-                              : colors.textSecondary,
-                          fontFamily: typography.sansMedium,
+                        styles.segmentOption,
+                        { borderRadius: radii.chipInner },
+                        settings.defaultOffsetDirection === 'after' && {
+                          backgroundColor: colors.primary,
                         },
                       ]}
                     >
-                      {t.after}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.segmentOptionText,
+                          {
+                            color:
+                              settings.defaultOffsetDirection === 'after'
+                                ? '#FFFFFF'
+                                : colors.textSecondary,
+                            fontFamily: typography.sansMedium,
+                          },
+                        ]}
+                      >
+                        {t.after}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('defaultDirection', t.tooltipDefaultDirection)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Default Power Nap Duration */}
-              <View style={styles.rowItem}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.defaultPowerNapLabel}
-                </Text>
-                <View style={styles.stepperGroup}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultPowerNapMinutes: Math.max(
-                          5,
-                          settings.defaultPowerNapMinutes - 5
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Minus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.stepValText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {t.nMin(settings.defaultPowerNapMinutes)}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      safeHaptics.selectionAsync();
-                      void updateSettings({
-                        defaultPowerNapMinutes: Math.min(
-                          180,
-                          settings.defaultPowerNapMinutes + 5
-                        ),
-                      });
-                    }}
-                    style={[styles.stepBtn, { backgroundColor: controlBg }]}
-                  >
-                    <Plus size={14} color={colors.textPrimary} />
-                  </TouchableOpacity>
+              {/* Default Power Nap Duration (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.defaultPowerNapLabel}
+                    </Text>
+                    {renderHelpIcon('defaultPowerNap')}
+                  </View>
+                  <View style={styles.stepperGroup}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultPowerNapMinutes: Math.max(
+                            5,
+                            settings.defaultPowerNapMinutes - 5
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Minus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.stepValText,
+                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      ]}
+                    >
+                      {t.nMin(settings.defaultPowerNapMinutes)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        safeHaptics.selectionAsync();
+                        void updateSettings({
+                          defaultPowerNapMinutes: Math.min(
+                            180,
+                            settings.defaultPowerNapMinutes + 5
+                          ),
+                        });
+                      }}
+                      style={[
+                        styles.stepBtn,
+                        { backgroundColor: controlBg, borderRadius: radii.chip },
+                      ]}
+                    >
+                      <Plus size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                {renderTooltipBox('defaultPowerNap', t.tooltipDefaultPowerNap)}
               </View>
             </View>
 
-            {/* 6. FEATURE TOGGLES & SIMPLICITY */}
+            {/* 6. FEATURE TOGGLES (NO ICONS per user requirement) */}
             <Text
               style={[
                 styles.sectionHeader,
@@ -1149,114 +1362,98 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              {/* Show Alarm Sequence Section */}
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleTextCol}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.toggleSequenceTitle}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {t.toggleSequenceDesc}
-                  </Text>
+              {/* Show Alarm Sequence Section (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.toggleSequenceTitle}
+                    </Text>
+                    {renderHelpIcon('toggleSequence')}
+                  </View>
+                  {renderSquircleToggle(settings.showAlarmSequenceSection, (val) =>
+                    void updateSettings({ showAlarmSequenceSection: val })
+                  )}
                 </View>
-                {renderSquircleToggle(settings.showAlarmSequenceSection, (val) =>
-                  void updateSettings({ showAlarmSequenceSection: val })
-                )}
+                {renderTooltipBox('toggleSequence', t.tooltipShowSequence)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Show Advanced Creation Controls */}
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleTextCol}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.toggleCreationControlsTitle}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {t.toggleCreationControlsDesc}
-                  </Text>
+              {/* Show Advanced Creation Controls (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.toggleCreationControlsTitle}
+                    </Text>
+                    {renderHelpIcon('toggleCreationControls')}
+                  </View>
+                  {renderSquircleToggle(settings.showCreationAdvancedControls, (val) =>
+                    void updateSettings({ showCreationAdvancedControls: val })
+                  )}
                 </View>
-                {renderSquircleToggle(settings.showCreationAdvancedControls, (val) =>
-                  void updateSettings({ showCreationAdvancedControls: val })
-                )}
+                {renderTooltipBox('toggleCreationControls', t.tooltipShowAdvanced)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Show Power Nap Button */}
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleTextCol}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.togglePowerNapTitle}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {t.togglePowerNapDesc}
-                  </Text>
+              {/* Show Power Nap Button (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.togglePowerNapTitle}
+                    </Text>
+                    {renderHelpIcon('togglePowerNap')}
+                  </View>
+                  {renderSquircleToggle(settings.showPowerNapButton, (val) =>
+                    void updateSettings({ showPowerNapButton: val })
+                  )}
                 </View>
-                {renderSquircleToggle(settings.showPowerNapButton, (val) =>
-                  void updateSettings({ showPowerNapButton: val })
-                )}
+                {renderTooltipBox('togglePowerNap', t.tooltipShowPowerNap)}
               </View>
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
-              {/* Show Confirmation Toasts */}
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleTextCol}>
-                  <Text
-                    style={[
-                      styles.rowTitle,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                    ]}
-                  >
-                    {t.toggleToastsTitle}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.rowDesc,
-                      { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                    ]}
-                  >
-                    {t.toggleToastsDesc}
-                  </Text>
+              {/* Show Confirmation Toasts (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.toggleToastsTitle}
+                    </Text>
+                    {renderHelpIcon('toggleToasts')}
+                  </View>
+                  {renderSquircleToggle(settings.showToastBanners, (val) =>
+                    void updateSettings({ showToastBanners: val })
+                  )}
                 </View>
-                {renderSquircleToggle(settings.showToastBanners, (val) =>
-                  void updateSettings({ showToastBanners: val })
-                )}
+                {renderTooltipBox('toggleToasts', t.tooltipShowToasts)}
               </View>
             </View>
 
-            {/* Reset Settings Button */}
+            {/* Restore Default Settings Button */}
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => {
@@ -1284,34 +1481,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 {t.resetSettingsBtn}
               </Text>
             </TouchableOpacity>
+
+            {/* View Source Code Button */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                safeHaptics.selectionAsync();
+                void Linking.openURL(PROJECT_GIT_URL);
+              }}
+              style={[
+                styles.sourceCodeBtn,
+                {
+                  backgroundColor: cardBg,
+                  borderColor: colors.surfaceBorder,
+                  borderRadius: radii.cardInner,
+                },
+              ]}
+            >
+              <Code size={16} color={colors.accent} />
+              <Text
+                style={[
+                  styles.sourceCodeBtnText,
+                  { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                ]}
+              >
+                {t.viewSourceCodeBtn}
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
 
       {/* Dedicated Modal for Interval Alarm Type Selection */}
       <Modal
         visible={alarmTypeModalVisible}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setAlarmTypeModalVisible(false)}
       >
         <View style={[styles.subModalBackdrop, { backgroundColor: colors.overlayBackdrop }]}>
           <Pressable
-            style={StyleSheet.absoluteFill}
+            style={styles.backdropDismissArea}
             onPress={() => setAlarmTypeModalVisible(false)}
           />
-          <View
+          <Animated.View
             style={[
               styles.subModalCard,
               shadows.modal,
               {
                 backgroundColor: isLight ? colors.cardOnBg : colors.surface,
                 borderColor: colors.surfaceBorder,
-                borderRadius: radii.card,
+                borderTopLeftRadius: radii.modalOuter,
+                borderTopRightRadius: radii.modalOuter,
+                transform: [{ translateY: alarmTypeSheetGesture.translateY }],
               },
             ]}
           >
-            <View style={styles.topBar}>
+            <View {...alarmTypeSheetGesture.dragHandlePanHandlers} style={styles.dragHandleArea}>
+              <View
+                style={[
+                  styles.dragHandleBar,
+                  {
+                    backgroundColor: colors.surfaceBorder,
+                    borderRadius: radii.handle,
+                  },
+                ]}
+              />
               <Text
                 style={[
                   styles.subModalTitle,
@@ -1320,28 +1555,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               >
                 {t.selectAlarmTypeModalTitle}
               </Text>
-              <TouchableOpacity
-                onPress={() => setAlarmTypeModalVisible(false)}
+              <Text
                 style={[
-                  styles.closeBtn,
-                  {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderRadius: radii.pill,
-                  },
+                  styles.subModalDesc,
+                  { color: colors.textSecondary, fontFamily: typography.sansRegular },
                 ]}
               >
-                <X size={16} color={colors.textPrimary} />
-              </TouchableOpacity>
+                {t.selectAlarmTypeModalDesc}
+              </Text>
             </View>
-
-            <Text
-              style={[
-                styles.subModalDesc,
-                { color: colors.textSecondary, fontFamily: typography.sansRegular },
-              ]}
-            >
-              {t.selectAlarmTypeModalDesc}
-            </Text>
 
             {/* Option 1: Standard Interval & Steps */}
             <TouchableOpacity
@@ -1385,7 +1607,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                   <View
                     style={[
                       styles.checkCircle,
-                      { backgroundColor: colors.primary },
+                      {
+                        backgroundColor: colors.primary,
+                        borderRadius: radii.chipInner,
+                      },
                     ]}
                   >
                     <Check size={14} color="#FFFFFF" />
@@ -1444,7 +1669,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                   <View
                     style={[
                       styles.checkCircle,
-                      { backgroundColor: colors.primary },
+                      {
+                        backgroundColor: colors.primary,
+                        borderRadius: radii.chipInner,
+                      },
                     ]}
                   >
                     <Check size={14} color="#FFFFFF" />
@@ -1460,7 +1688,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 {t.typeEscalatingDesc}
               </Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     </Modal>
@@ -1470,38 +1698,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
     justifyContent: 'flex-end',
-    alignItems: 'center',
+  },
+  backdropDismissArea: {
+    flex: 1,
   },
   sheet: {
     width: '100%',
-    maxWidth: 480,
-    maxHeight: '90%',
+    maxHeight: '92%',
     borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 12,
     paddingBottom: 28,
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
+  dragHandleArea: {
+    width: '100%',
+    paddingBottom: 6,
   },
-  sheetTitle: {
-    fontSize: 22,
+  dragHandleBar: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    marginBottom: 8,
   },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
+  scrollArea: {
+    flexShrink: 1,
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   sectionHeader: {
     fontSize: 12,
@@ -1515,17 +1739,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-  rowItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
   rowBetween: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
   },
   columnItem: {
     paddingHorizontal: 14,
@@ -1535,14 +1753,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
+  },
+  rowLabelNoIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
   },
   rowTitle: {
     fontSize: 14,
+    flexShrink: 1,
   },
-  rowDesc: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
+  helpBadgeBtn: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  tooltipBox: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+  },
+  tooltipText: {
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   divider: {
     height: 1,
@@ -1551,12 +1793,11 @@ const styles = StyleSheet.create({
   segmentedPill: {
     flexDirection: 'row',
     borderWidth: 1,
-    padding: 2,
+    padding: 3,
   },
   segmentOption: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 12,
   },
   segmentOptionText: {
     fontSize: 13,
@@ -1628,29 +1869,24 @@ const styles = StyleSheet.create({
   squircleSwitchThumb: {
     width: 20,
     height: 20,
-    borderRadius: 7,
   },
-  alarmTypeSelectorCard: {
+  alarmTypeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1.5,
-    padding: 14,
   },
   alarmTypeLeft: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 12,
     marginRight: 8,
   },
   alarmTypeIconBox: {
     width: 40,
     height: 40,
-    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
   },
   alarmTypeTextCol: {
     flex: 1,
@@ -1667,7 +1903,6 @@ const styles = StyleSheet.create({
   stepBtn: {
     width: 32,
     height: 32,
-    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1675,17 +1910,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     minWidth: 56,
     textAlign: 'center',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  toggleTextCol: {
-    flex: 1,
   },
   resetBtn: {
     flexDirection: 'row',
@@ -1699,28 +1923,38 @@ const styles = StyleSheet.create({
   resetBtnText: {
     fontSize: 14,
   },
+  sourceCodeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    paddingVertical: 14,
+    marginTop: 10,
+    gap: 8,
+  },
+  sourceCodeBtnText: {
+    fontSize: 14,
+  },
   subModalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.76)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    justifyContent: 'flex-end',
   },
   subModalCard: {
     width: '100%',
-    maxWidth: 420,
-    borderWidth: 1,
-    padding: 20,
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
   },
   subModalTitle: {
     fontSize: 18,
-    flex: 1,
-    marginRight: 10,
+    marginTop: 4,
+    marginBottom: 6,
   },
   subModalDesc: {
     fontSize: 13,
     lineHeight: 19,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   optionCard: {
     borderWidth: 1.5,
@@ -1749,7 +1983,6 @@ const styles = StyleSheet.create({
   checkCircle: {
     width: 24,
     height: 24,
-    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },

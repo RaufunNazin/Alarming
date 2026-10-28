@@ -134,6 +134,7 @@ export const AlarmRingingOverlay: React.FC = () => {
               styles.pulseCircle,
               {
                 borderColor: colors.surfaceBorder,
+                borderRadius: radii.modalOuter,
                 transform: [{ scale: pulseAnim }],
               },
             ]}
@@ -144,6 +145,7 @@ export const AlarmRingingOverlay: React.FC = () => {
                 {
                   borderColor: colors.surfaceBorderHighlight,
                   backgroundColor: colors.surfaceElevated,
+                  borderRadius: radii.cardOuter,
                 },
               ]}
             >
@@ -332,7 +334,6 @@ const styles = StyleSheet.create({
   pulseCircle: {
     width: 260,
     height: 260,
-    borderRadius: 130,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -341,7 +342,6 @@ const styles = StyleSheet.create({
   innerPulseCircle: {
     width: 220,
     height: 220,
-    borderRadius: 110,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',

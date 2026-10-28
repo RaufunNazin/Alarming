@@ -39,6 +39,7 @@ export interface AlarmItem {
   // Organization & Day-off Skip
   category?: string;
   skipNextDate?: string; // 'YYYY-MM-DD' local cycle date to skip
+  pausedUntil?: number;  // epoch ms until which this alarm is paused (e.g. 24h category pause)
 
   // Generated timestamps for display and tracking
   generatedSequence?: string[]; // e.g. ["06:15 AM", "06:20 AM", ..., "07:00 AM"]
@@ -50,6 +51,12 @@ export interface AlarmItem {
   lastDismissedDate?: string; // 'YYYY-MM-DD'
   notificationIds?: string[];
   snoozedUntil?: number; // epoch ms
+}
+
+export interface ActivePowerNap {
+  endsAt: number; // epoch ms
+  durationMinutes: number;
+  notificationId?: string;
 }
 
 export interface ActiveRingingAlarm {

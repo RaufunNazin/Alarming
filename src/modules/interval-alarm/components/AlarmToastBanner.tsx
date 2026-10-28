@@ -179,7 +179,7 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
                 styles.actionButton,
                 {
                   backgroundColor: colors.accent,
-                  borderRadius: radii.pill,
+                  borderRadius: radii.chipInner,
                 },
               ]}
               accessibilityRole="button"

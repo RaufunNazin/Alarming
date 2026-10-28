@@ -435,3 +435,62 @@ export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem):
     dismissPresentedNotificationsForAlarm(alarm.id),
   ]);
 }
+
+/**
+ * Schedules a standalone OS notification for an active Power Nap.
+ */
+export async function schedulePowerNapNotification(
+  endsAt: number,
+  label: string = 'Power Nap'
+): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+
+  await cancelPowerNapNotification();
+
+  try {
+    const triggerDate = new Date(endsAt);
+    if (triggerDate.getTime() <= Date.now()) return null;
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: label,
+        body: 'Power nap finished — time to wake up!',
+        sound: ALARM_NOTIFICATION_SOUND,
+        categoryIdentifier: SINGLE_CATEGORY_ID,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        sticky: true,
+        autoDismiss: false,
+        interruptionLevel: 'critical',
+        data: {
+          alarmId: 'power_nap',
+          type: 'single',
+          stepIndex: 0,
+          totalSteps: 1,
+          timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+        },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerDate,
+        channelId: ALARM_CHANNEL_ID,
+        delivery: 'alarmClock',
+      },
+    });
+    return id;
+  } catch (e) {
+    console.warn('Error scheduling power nap notification:', e);
+    return null;
+  }
+}
+
+/**
+ * Cancels any scheduled or presented Power Nap notifications.
+ */
+export async function cancelPowerNapNotification(notificationId?: string): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  await Promise.all([
+    cancelScheduledIdsForAlarmInternal('power_nap', notificationId ? [notificationId] : undefined),
+    dismissPresentedNotificationsForAlarm('power_nap'),
+  ]);
+}

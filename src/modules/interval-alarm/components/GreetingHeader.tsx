@@ -1,11 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
-import { Settings, Flame, Clock } from 'lucide-react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, AppState, Linking } from 'react-native';
+import { Settings, Flame, ShieldCheck, X } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
-import { formatTime12hLocalized, useTranslation } from '../../../core/i18n/translations';
+import { useTranslation } from '../../../core/i18n/translations';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { useAlarmStore } from '../store/alarmStore';
-import { findNextUpcomingAlarm, getCompactCountdownText } from '../engine/intervalEngine';
+import { alarmSoundPlayer, DeviceSafetyStatus } from '../../../core/audio/alarmSoundPlayer';
+import {
+  checkNotificationPermissions,
+  initializeAlarmNotifications,
+} from '../../../core/notifications/alarmNotifier';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface GreetingHeaderProps {
@@ -16,45 +20,99 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
   onOpenSettings,
 }) {
   const { colors, typography, spacing, radii } = useTheme();
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
-  const alarms = useAlarmStore((s) => s.alarms);
-  const [now, setNow] = useState(() => new Date());
+  const enableSafetyCheckBanner = useSettingsStore((s) => s.enableSafetyCheckBanner);
+
+  const [safetyStatus, setSafetyStatus] = useState<DeviceSafetyStatus>({
+    batteryLevel: 100,
+    isCharging: true,
+    alarmVolumePercent: 100,
+    canUseFullScreenIntent: true,
+  });
+  const [notifGranted, setNotifGranted] = useState<boolean>(true);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refreshSafetyChecks = useCallback(async () => {
+    if (!enableSafetyCheckBanner) return;
+    try {
+      const [deviceStatus, permStatus] = await Promise.all([
+        alarmSoundPlayer.getDeviceSafetyStatus(),
+        checkNotificationPermissions(),
+      ]);
+      setSafetyStatus((prev) =>
+        prev.batteryLevel === deviceStatus.batteryLevel &&
+        prev.isCharging === deviceStatus.isCharging &&
+        prev.alarmVolumePercent === deviceStatus.alarmVolumePercent &&
+        prev.canUseFullScreenIntent === deviceStatus.canUseFullScreenIntent
+          ? prev
+          : deviceStatus
+      );
+      setNotifGranted((prev) => (prev === permStatus.granted ? prev : permStatus.granted));
+    } catch {
+      // Ignore transient errors
+    }
+  }, [enableSafetyCheckBanner]);
 
   useEffect(() => {
-    const syncClockIfMinuteChanged = () => {
-      const next = new Date();
-      setNow((prev) =>
-        Math.floor(prev.getTime() / 60000) === Math.floor(next.getTime() / 60000)
-          ? prev
-          : next
-      );
-    };
+    if (!enableSafetyCheckBanner) return;
 
-    const timer = setInterval(syncClockIfMinuteChanged, 10000);
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        syncClockIfMinuteChanged();
+    void refreshSafetyChecks();
+    const interval = setInterval(() => {
+      void refreshSafetyChecks();
+    }, 20000);
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void refreshSafetyChecks();
       }
     });
 
     return () => {
-      clearInterval(timer);
+      clearInterval(interval);
       sub.remove();
+    };
+  }, [enableSafetyCheckBanner, refreshSafetyChecks]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
     };
   }, []);
 
-  const upcomingInfo = React.useMemo(() => {
-    const next = findNextUpcomingAlarm(alarms, now);
-    if (!next) return null;
-    const compactCountdown = getCompactCountdownText(next.nextDate, now);
-    const formattedTime = formatTime12hLocalized(
-      next.nextDate.getHours(),
-      next.nextDate.getMinutes(),
-      language
-    ).full;
-    return `${t.nextAlarmPrefix}: ${compactCountdown} • ${formattedTime}`;
-  }, [alarms, now, language, t.nextAlarmPrefix]);
+  const isPermissionsReady = notifGranted && safetyStatus.canUseFullScreenIntent;
+
+  const handleSafetyBadgePress = async () => {
+    safeHaptics.selectionAsync();
+    if (isPermissionsReady) {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+      useAlarmStore.setState({
+        toastMessage: t.safetyAllSystemsGo,
+        toastActionLabel: null,
+        onToastAction: null,
+      });
+      toastTimerRef.current = setTimeout(() => {
+        useAlarmStore.setState({ toastMessage: null });
+      }, 3200);
+      return;
+    }
+
+    if (!notifGranted) {
+      await initializeAlarmNotifications();
+      const after = await checkNotificationPermissions();
+      setNotifGranted(after.granted);
+      if (!after.granted && !after.canAskAgain) {
+        void Linking.openSettings();
+      }
+    } else if (!safetyStatus.canUseFullScreenIntent) {
+      alarmSoundPlayer.openFullScreenIntentSettings();
+    }
+    void refreshSafetyChecks();
+  };
 
   const handleOpenSettings = () => {
     safeHaptics.selectionAsync();
@@ -88,7 +146,7 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
               {
                 backgroundColor: colors.primaryMuted,
                 borderColor: colors.primary + '55',
-                borderRadius: radii.pill,
+                borderRadius: radii.chip,
               },
             ]}
           >
@@ -106,33 +164,33 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
       </View>
 
       <View style={styles.rightRow}>
-        <View
-          style={[
-            styles.sleepCounterBadge,
-            {
-              backgroundColor: upcomingInfo ? colors.accentSoft : colors.surfaceSubtle,
-              borderColor: upcomingInfo ? colors.accent + '35' : colors.surfaceBorder,
-              borderRadius: radii.pill,
-            },
-          ]}
-        >
-          <Clock
-            size={11}
-            color={upcomingInfo ? colors.accent : colors.textSecondary}
-          />
-          <Text
-            numberOfLines={1}
+        {enableSafetyCheckBanner && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => void handleSafetyBadgePress()}
+            accessibilityLabel={
+              isPermissionsReady ? t.safetyAllSystemsGo : t.safetyPermissionsNeeded
+            }
             style={[
-              styles.sleepCounterText,
+              styles.iconBtn,
               {
-                color: upcomingInfo ? colors.accent : colors.textSecondary,
-                fontFamily: upcomingInfo ? typography.numbersBold : typography.sansMedium,
+                backgroundColor: isPermissionsReady
+                  ? 'rgba(16, 185, 129, 0.12)'
+                  : 'rgba(239, 68, 68, 0.14)',
+                borderColor: isPermissionsReady
+                  ? 'rgba(16, 185, 129, 0.35)'
+                  : 'rgba(239, 68, 68, 0.40)',
+                borderRadius: radii.chip,
               },
             ]}
           >
-            {upcomingInfo ?? t.noUpcomingAlarms}
-          </Text>
-        </View>
+            {isPermissionsReady ? (
+              <ShieldCheck size={18} color={colors.success} />
+            ) : (
+              <X size={18} color={colors.danger} strokeWidth={2.5} />
+            )}
+          </TouchableOpacity>
+        )}
 
         {onOpenSettings && (
           <TouchableOpacity
@@ -140,11 +198,11 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             onPress={handleOpenSettings}
             accessibilityLabel={t.settingsTitle}
             style={[
-              styles.settingsBtn,
+              styles.iconBtn,
               {
                 backgroundColor: colors.surfaceSubtle,
                 borderColor: colors.surfaceBorder,
-                borderRadius: radii.pill,
+                borderRadius: radii.chip,
               },
             ]}
           >
@@ -175,7 +233,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 8,
-    flexShrink: 1,
+    flexShrink: 0,
   },
   titleText: {
     fontSize: 22,
@@ -193,21 +251,7 @@ const styles = StyleSheet.create({
   escalatingPillText: {
     fontSize: 10.5,
   },
-  sleepCounterBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderWidth: 1,
-    flexShrink: 1,
-  },
-  sleepCounterText: {
-    fontSize: 11,
-    letterSpacing: 0.1,
-    flexShrink: 1,
-  },
-  settingsBtn: {
+  iconBtn: {
     width: 38,
     height: 38,
     borderWidth: 1,

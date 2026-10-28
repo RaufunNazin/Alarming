@@ -44,16 +44,23 @@ export const TRANSLATIONS = {
     // Header & Home
     appTitle: 'Alarms',
     settingsTitle: 'Settings',
-    noAlarmsTitle: 'No Alarms Set',
-    noAlarmsSub: 'Tap + to add your first alarm',
+    noAlarmsTitle: 'No Alarms Yet',
+    noAlarmsSub: 'Tap + to set an alarm',
     powerNapLabel: 'Power Nap',
     powerNapButtonShort: (mins: number) => `${mins}m Nap`,
-    powerNapHint: 'Long press for preset',
+    powerNapHint: 'Hold to change time',
+    powerNapTapToCancel: 'Tap to cancel',
+    cancelPowerNapTitle: 'Cancel Power Nap?',
+    cancelPowerNapBody: 'Your active power nap timer will be stopped.',
+    keepNapBtn: 'Keep Nap',
+    cancelNapBtn: 'Cancel Nap',
+    powerNapStartedToast: (mins: number) => `Power nap set for ${mins} minutes`,
+    powerNapCancelledToast: 'Power nap cancelled',
 
     // Periods & Days
     am: 'AM',
     pm: 'PM',
-    everyday: 'Everyday',
+    everyday: 'Every day',
     weekdays: 'Weekdays',
     weekends: 'Weekends',
     once: 'Once',
@@ -75,10 +82,10 @@ export const TRANSLATIONS = {
     editAlarmTitle: 'Edit Alarm',
     cancel: 'Cancel',
     save: 'Save',
-    saveChanges: 'Save Changes',
+    saveChanges: 'Save',
     delete: 'Delete',
     done: 'Done',
-    alarmLabelPlaceholder: 'Alarm Label (Optional)',
+    alarmLabelPlaceholder: 'Alarm Label',
 
     // Modes
     modeSingle: 'Single',
@@ -87,64 +94,64 @@ export const TRANSLATIONS = {
     startTime: 'Start Time',
     endTime: 'End Time',
     alarmTime: 'Alarm Time',
-    targetTime: 'Target Time',
-    intervalLabel: 'Interval',
+    targetTime: 'Main Time',
+    intervalLabel: 'Gap Between Alarms',
     everyNMin: (mins: number) => `Every ${mins} min`,
     nMin: (mins: number) => `${mins} min`,
-    directionLabel: 'Direction',
+    directionLabel: 'Ring Direction',
     before: 'Before',
     after: 'After',
-    alarmsCountLabel: 'Alarms',
+    alarmsCountLabel: 'Number of Alarms',
     repeatDaysLabel: 'Repeat Days',
     repeatLabel: 'Repeat',
 
     // Escalating Info Banner
-    escalatingModeActiveTitle: 'Escalating Interval Active',
-    escalatingModeDesc: 'Automatic tightening intervals: 15m → 10m → 5m → 3m → 2m → 1m',
-    escalatingWindowDesc: 'Intervals automatically shrink as End Time approaches (20m → 15m → 10m → 5m → 3m → 2m → 1m)',
-    generatesNAlarms: (count: number) => `Generates ${count} ${count === 1 ? 'alarm' : 'alarms'}`,
+    escalatingModeActiveTitle: 'Escalating Alarms On',
+    escalatingModeDesc: 'Alarms ring closer together: 15m → 10m → 5m → 3m → 2m → 1m',
+    escalatingWindowDesc:
+      'Alarms ring more often as End Time gets closer (20m → 15m → 10m → 5m → 3m → 2m → 1m)',
+    generatesNAlarms: (count: number) => `${count} ${count === 1 ? 'alarm' : 'alarms'}`,
 
     // Granular Sequence Section
-    alarmSequenceTitle: (count: number) => `Alarm Sequence (${count})`,
+    alarmSequenceTitle: (count: number) => `Alarm List (${count})`,
     alarmSequencePartialTitle: (enabled: number, total: number) =>
-      `Alarm Sequence (${enabled}/${total} active)`,
-    alarmSequenceHint:
-      'Tap any time to adjust it individually, or toggle specific alarms on/off.',
-    resetCustomTimings: 'Reset Custom Timings',
+      `Alarm List (${enabled}/${total} on)`,
+    alarmSequenceHint: 'Tap a time to change it, or switch individual alarms on or off.',
+    resetCustomTimings: 'Reset Times',
     stepStart: 'Start',
     stepEnd: 'End',
-    stepTarget: 'Target',
-    stepN: (n: number) => `Step ${n}`,
-    adjustStepN: (n: number) => `Adjust Step ${n}`,
+    stepTarget: 'Main',
+    stepN: (n: number) => `Alarm ${n}`,
+    adjustStepN: (n: number) => `Adjust Alarm ${n}`,
 
     // Clock & Keypad Input
     ringsInShort: 'Rings in',
-    selectTime: 'Select Time',
-    typeInTime: 'Type in time',
+    selectTime: 'Done',
+    typeInTime: 'Type time',
     hourLabel: 'Hour',
     minuteLabel: 'Minute',
-    useKeyboardTooltip: 'Type time with number keypad',
-    useDialTooltip: 'Select time on clock dial',
+    useKeyboardTooltip: 'Type time with keypad',
+    useDialTooltip: 'Pick time on clock dial',
 
     // Ringing Overlay
-    ringingNow: 'RINGING NOW',
-    defaultIntervalAlarmTitle: 'Interval Alarm',
-    intervalCascadeSub: (mins: number) => `Interval Cascade (${mins}m)`,
-    escalatingCascadeSub: 'Escalating Cascade',
-    snoozeBtn: (mins: number) => `Snooze (${mins} min)`,
-    dismissAlarmBtn: 'Dismiss Alarm',
+    ringingNow: 'ALARM RINGING',
+    defaultIntervalAlarmTitle: 'Alarm',
+    intervalCascadeSub: (mins: number) => `Rings every ${mins}m`,
+    escalatingCascadeSub: 'Escalating Alarms',
+    snoozeBtn: (mins: number) => `Snooze (${mins}m)`,
+    dismissAlarmBtn: 'Stop Alarm',
 
     // Power Nap Preset Modal
-    powerNapPresetTitle: 'Power Nap Preset',
+    powerNapPresetTitle: 'Power Nap Time',
     powerNapPresetDesc:
-      'Choose your default power nap duration. Single-tap the Power Nap button on the home screen to start immediately, or long-press anytime to change.',
-    quickPresetsLabel: 'Quick Presets',
+      'Pick your power nap length. Tap the Nap button on the home screen to start right away, or hold it to change.',
+    quickPresetsLabel: 'Choose Duration',
     customDurationLabel: 'Custom Duration (minutes)',
-    savePresetBtn: 'Save Preset',
-    startNapNowBtn: (mins: number) => `Start ${mins}m Nap Now`,
+    savePresetBtn: 'Save Default',
+    startNapNowBtn: (mins: number) => `Start ${mins}m Nap`,
 
     // Settings Modal
-    sectionAppearance: 'Appearance & Language',
+    sectionAppearance: 'Look & Language',
     themeLabel: 'Theme',
     themeDark: 'Dark',
     themeLight: 'Light',
@@ -152,128 +159,159 @@ export const TRANSLATIONS = {
     langEnglish: 'English',
     langBangla: 'বাংলা',
 
-    sectionAlarmType: 'Interval Alarm System',
-    intervalAlarmTypeLabel: 'Interval Alarm Type',
-    selectAlarmTypeModalTitle: 'Select Interval Alarm Type',
+    sectionAlarmType: 'Multi-Alarm Style',
+    intervalAlarmTypeLabel: 'Alarm Spacing Style',
+    selectAlarmTypeModalTitle: 'Choose Alarm Spacing Style',
     selectAlarmTypeModalDesc:
-      'Choose how Window and Before/After interval alarms calculate their intermediate alarm timings.',
-    typeStandardTitle: 'Standard Interval & Steps',
-    typeStandardShort: 'Standard',
+      'Pick how multiple alarms are spaced in Window and Before/After modes.',
+    typeStandardTitle: 'Fixed Gap (Standard)',
+    typeStandardShort: 'Fixed Gap',
     typeStandardDesc:
-      'Manually configure fixed interval minutes and number of alarm steps for Window and Before/After alarms.',
-    typeEscalatingTitle: 'Escalating Interval Alarm',
+      'Alarms ring at a fixed gap (for example, every 10 minutes) for your chosen number of times.',
+    typeEscalatingTitle: 'Escalating (Closer Together)',
     typeEscalatingShort: 'Escalating',
     typeEscalatingDesc:
-      'Replaces manual interval and step controls with automatic progressively faster intervals (15m → 10m → 5m → 3m → 2m → 1m) for both Window and Before/After alarms.',
+      'Alarms automatically ring closer together as wake-up time approaches (15m → 10m → 5m → 3m → 2m → 1m).',
 
-    sectionDefaults: 'Default Times & Steps',
-    defaultIntervalLabel: 'Default Interval',
-    defaultStepsLabel: 'Default Steps (Before/After)',
-    defaultWindowDurationLabel: 'Default Window Span',
+    sectionDefaults: 'Default Times',
+    defaultIntervalLabel: 'Default Gap',
+    defaultStepsLabel: 'Default Alarm Count',
+    defaultWindowDurationLabel: 'Default Window Length',
     defaultDirectionLabel: 'Default Direction',
-    defaultSnoozeLabel: 'Default Snooze Time',
+    defaultSnoozeLabel: 'Default Snooze',
     defaultPowerNapLabel: 'Default Power Nap',
 
-    sectionFeatures: 'Feature Toggles & Simplicity',
-    toggleSequenceTitle: 'Show Alarm Sequence Section',
+    sectionFeatures: 'Feature Toggles',
+    toggleSequenceTitle: 'Show Individual Alarm List',
     toggleSequenceDesc:
-      'Show the expandable individual alarm timing list inside the Edit Alarm modal',
-    toggleCreationControlsTitle: 'Show Advanced Creation Controls',
+      'Show the full list of individual alarm times inside Edit Alarm so you can adjust or turn off specific steps.',
+    toggleCreationControlsTitle: 'Show Extra Options When Adding',
     toggleCreationControlsDesc:
-      'Show interval, step count, and direction controls when creating an alarm (uses defaults when hidden)',
-    toggleKeypadInputTitle: 'Number Keypad Time Input',
-    toggleKeypadInputDesc:
-      'Show the keyboard icon on the clock picker to type alarm times using the number keypad',
+      'Show gap, alarm count, and direction controls when creating a new alarm.',
+    toggleKeypadInputTitle: 'Keypad Time Input',
+    toggleKeypadInputDesc: 'Allow typing alarm times with the number keypad.',
     togglePowerNapTitle: 'Show Power Nap Button',
-    togglePowerNapDesc: 'Show the floating Power Nap button on the main screen',
-    toggleToastsTitle: 'Show Confirmation Toasts',
-    toggleToastsDesc: 'Show "Alarm set for..." confirmation banner when saving or toggling alarms',
-    resetSettingsBtn: 'Reset Settings to Default',
+    togglePowerNapDesc: 'Show the quick Power Nap button at the bottom of the home screen.',
+    toggleToastsTitle: 'Show Confirmation Messages',
+    toggleToastsDesc: 'Show a popup message telling you how long until the alarm rings.',
+    resetSettingsBtn: 'Restore Defaults',
+    viewSourceCodeBtn: 'View Source Code',
 
-    // 1a. Live Countdown & Header Sleep Window
+    // Settings ? Tooltips (Simple & clear for every option)
+    tooltipTheme: 'Switch between dark mode (best for night) and light mode.',
+    tooltipLanguage: 'Change the app language between English and Bangla.',
+    tooltipSafetyCheck:
+      'Shows a status icon at the top to verify alarm permissions and system readiness.',
+    tooltipVolumeButtons:
+      'Choose what happens when you press your phone volume buttons while an alarm is ringing.',
+    tooltipEarlyDismiss:
+      'Shows an "I\'m already awake" button before your alarm rings so you can skip it for today.',
+    tooltipCategories:
+      'Add or remove category tags (like Work or Workout) to organize and pause alarms together.',
+    tooltipAlarmType:
+      'Choose between a fixed minute gap or escalating alarms that ring closer together.',
+    tooltipDefaultSnooze: 'How many minutes an alarm waits when you tap Snooze.',
+    tooltipDefaultInterval: 'Default minute gap between alarms in Window and Before/After modes.',
+    tooltipDefaultSteps: 'Default number of alarms created in Before/After mode.',
+    tooltipDefaultWindow: 'Default time span between Start Time and End Time in Window mode.',
+    tooltipDefaultDirection:
+      'Whether Before/After alarms ring leading up to your time (Before) or starting from it (After).',
+    tooltipDefaultPowerNap:
+      'Default duration when you tap the Power Nap button on the home screen.',
+    tooltipShowSequence:
+      'Show the expandable list of every individual alarm step when editing an alarm.',
+    tooltipShowAdvanced:
+      'Show gap, alarm count, and direction controls right inside the New Alarm screen.',
+    tooltipShowPowerNap: 'Show or hide the quick Power Nap button on the home screen.',
+    tooltipShowToasts: 'Show a message at the bottom when you save or turn on an alarm.',
+
+    // Header Safety Status Icon Messages
     noUpcomingAlarms: 'No upcoming alarms',
     nextAlarmPrefix: 'Next',
     nextAlarmHeaderBadge: (countdown: string, timeStr: string) =>
       `Next: ${countdown} • ${timeStr}`,
-
-    // 1b. Pre-Sleep Safety Check
-    allSystemsGo: 'All Systems Go • Ready for sleep',
-    safetyAllSystemsGo: 'All Systems Go • Ready for sleep',
+    allSystemsGo: 'Everything is set up properly! Your alarms are ready to ring.',
+    safetyAllSystemsGo: 'Everything is set up properly! Your alarms are ready to ring.',
+    safetyPermissionsNeeded: 'Permissions needed so alarms can ring properly.',
     safetyBatteryLowPrefix: 'Battery low',
-    safetyBatteryLowSuffix: '. Plug in charger to ensure alarms ring',
-    safetyVolumeLow: 'Alarm volume low. Increase volume so alarms are audible',
-    safetyNotificationsBlocked: 'Notifications blocked. Tap to enable alarm alerts',
+    safetyBatteryLowSuffix: '. Plug in charger so alarms ring on time.',
+    safetyVolumeLow: 'Alarm volume is low. Turn up alarm volume to hear your alarms.',
+    safetyNotificationsBlocked: 'Notifications are off. Tap to allow alarm alerts.',
     batteryLowWarn: (pct: number) =>
-      `Battery low (${pct}%). Plug in charger to ensure alarms ring`,
+      `Battery low (${pct}%). Plug in charger so alarms ring on time.`,
     volumeLowWarn: (pct: number) =>
-      `Alarm volume low (${pct}%). Increase volume so alarms are audible`,
-    notificationsBlockedWarn:
-      'Notifications blocked. Tap to enable alarm alerts',
+      `Alarm volume is low (${pct}%). Turn it up to hear your alarms.`,
+    notificationsBlockedWarn: 'Notifications are off. Tap to allow alarm alerts.',
 
-    // 2a. Early Dismissal ("I'm Already Awake")
+    // Early Dismissal ("I'm Already Awake")
     earlyDismissTitle: (label: string, mins: number) =>
       `${label || 'Alarm'} in ${mins} min`,
-    earlyDismissAction: "I'm already awake (Dismiss today)",
+    earlyDismissAction: "I'm already awake (Skip today)",
     earlyDismissBannerTitle: (label: string, mins: number) =>
-      `${label || 'Alarm'} in ${mins} min — I'm already awake`,
-    earlyDismissBannerSub: 'Tap to dismiss today without disabling repeat schedule',
-    earlyDismissConfirmToast: "Dismissed today's upcoming alarm",
+      `${label || 'Alarm'} rings in ${mins} min — Already awake?`,
+    earlyDismissBannerSub: 'Tap to skip today without turning off your repeat schedule',
+    earlyDismissConfirmToast: "Skipped today's upcoming alarm",
 
-    // 2b. Skip Next Occurrence
+    // Skip Next Occurrence
     skipNextBtn: 'Skip Next',
     resumeNextBtn: 'Resume Next',
-    skippingNextPrefix: 'Skipping next:',
-    resumedScheduleToast: 'Resumed normal alarm schedule',
-    skippingNextBadge: (dateLabel: string) => `Skipping next: ${dateLabel}`,
+    skippingNextPrefix: 'Skipping:',
+    resumedScheduleToast: 'Alarm schedule resumed',
+    skippingNextBadge: (dateLabel: string) => `Skipping: ${dateLabel}`,
+    pausedFor24hBadge: 'Off for 24h',
 
-    // 2c. Categories & Group Toggles
+    // Categories & 24h Group Pause
     categoryLabel: 'Category',
     categoryAll: 'All',
     categoryNone: 'None',
-    groupToggleBtnOn: (cat: string) => `Enable all ${cat}`,
-    groupToggleBtnOff: (cat: string) => `Turn off all ${cat}`,
-    groupToggleActionOn: (cat: string) => `Enable all ${cat}`,
-    groupToggleActionOff: (cat: string) => `Turn off all ${cat}`,
+    groupToggleBtnOn: (cat: string) => `Turn on all ${cat} alarms`,
+    groupToggleBtnOff: (cat: string) => `Turn off all ${cat} alarms for 24h`,
+    groupToggleActionOn: (cat: string) => `Turn on all ${cat} alarms`,
+    groupToggleActionOff: (cat: string) => `Turn off all ${cat} alarms for 24h`,
     groupToggleConfirmTitle: (cat: string, enable: boolean) =>
-      `${enable ? 'Enable' : 'Turn Off'} All ${cat} Alarms?`,
+      enable ? `Turn On All ${cat} Alarms?` : `Turn Off ${cat} Alarms for 24 Hours?`,
     groupToggleModalTitle: (cat: string, enable: boolean) =>
-      `${enable ? 'Enable' : 'Turn Off'} All ${cat} Alarms?`,
+      enable ? `Turn On All ${cat} Alarms?` : `Turn Off ${cat} Alarms for 24 Hours?`,
     groupToggleConfirmDesc: (cat: string, count: number, enable: boolean) =>
-      `This will ${enable ? 'turn on' : 'turn off'} all ${count} ${cat} ${
-        count === 1 ? 'alarm' : 'alarms'
-      } at once.`,
+      enable
+        ? `This will turn on all ${count} ${cat} ${count === 1 ? 'alarm' : 'alarms'} right now.`
+        : `This will pause all ${count} ${cat} ${
+            count === 1 ? 'alarm' : 'alarms'
+          } for the next 24 hours, then automatically turn them back on.`,
     groupToggleModalBody: (cat: string, count: number, enable: boolean) =>
-      `This will ${enable ? 'turn on' : 'turn off'} all ${count} ${cat} ${
-        count === 1 ? 'alarm' : 'alarms'
-      } at once.`,
+      enable
+        ? `This will turn on all ${count} ${cat} ${count === 1 ? 'alarm' : 'alarms'} right now.`
+        : `This will pause all ${count} ${cat} ${
+            count === 1 ? 'alarm' : 'alarms'
+          } for the next 24 hours, then automatically turn them back on.`,
     cancelBtn: 'Cancel',
     confirmBtn: 'Confirm',
     confirmActionBtn: 'Confirm',
 
-    // 3b. Hardware Volume Buttons & Safety Settings
-    sectionHardware: 'Hardware & Sleep Controls',
-    sectionSafetyAndHardware: 'Safety, Sleep & Hardware Buttons',
-    volumeButtonsLabel: 'Volume Buttons (While Ringing)',
-    volumeButtonActionLabel: 'Hardware Volume Buttons',
+    // Hardware Volume Buttons & Safety Settings
+    sectionHardware: 'Safety & Controls',
+    sectionSafetyAndHardware: 'Safety & Controls',
+    volumeButtonsLabel: 'Volume Buttons',
+    volumeButtonActionLabel: 'Volume Buttons (While Ringing)',
     volumeButtonActionDesc:
-      'Choose what happens when you press physical Volume Up/Down while an alarm is ringing',
+      'Choose what happens when you press volume buttons while an alarm rings.',
     volumeActionSnooze: 'Snooze',
-    volumeActionDismiss: 'Dismiss',
-    volumeActionNone: 'Do Nothing',
+    volumeActionDismiss: 'Stop',
+    volumeActionNone: 'Nothing',
     volumeRingingHintSnooze: 'Press Volume button to Snooze',
-    volumeRingingHintDismiss: 'Press Volume button to Dismiss',
-    earlyDismissWindowLabel: "Early Dismissal ('I'm Awake') Window",
+    volumeRingingHintDismiss: 'Press Volume button to Stop',
+    earlyDismissWindowLabel: 'Early Wake-Up Window',
     earlyDismissWindowDesc:
-      "Show the 'I'm already awake' card when an active alarm is within this window",
-    safetyCheckToggleTitle: 'Pre-Sleep Safety & Battery Check',
+      'Show the "Already awake?" card when an alarm is ringing within this time.',
+    safetyCheckToggleTitle: 'System & Permission Check',
     safetyCheckToggleDesc:
-      'Show status check for low battery (<20%), low alarm volume, and permissions',
-    toggleSafetyCheckTitle: 'Pre-Sleep Safety & Battery Check',
+      'Show the status icon beside Settings to verify alarm permissions.',
+    toggleSafetyCheckTitle: 'System & Permission Check',
     toggleSafetyCheckDesc:
-      'Warn on the main screen if battery is <20%, alarm volume is <30%, or notifications are blocked',
+      'Show the status icon beside Settings to verify alarm permissions.',
 
-    // 6a & 8. Duplicate, Swipe & Undo
-    duplicateAlarmBtn: 'Duplicate Alarm',
+    // Duplicate, Swipe & Undo
+    duplicateAlarmBtn: 'Duplicate',
     copySuffix: '(Copy)',
     editAction: 'Edit',
     deleteAction: 'Delete',
@@ -286,9 +324,9 @@ export const TRANSLATIONS = {
     cardActionsTitle: 'Alarm Options',
 
     // Categories Management in Settings
-    sectionCategories: 'Categories Management',
-    manageCategoriesDesc:
-      'Create or remove custom category tags to filter and group-toggle your alarms.',
+    sectionCategories: 'Categories',
+    categoriesManageLabel: 'Alarm Categories',
+    manageCategoriesDesc: 'Add or remove category tags to group your alarms.',
     newCategoryPlaceholder: 'New category name...',
     addCategoryPlaceholder: 'New category name...',
     addCategoryBtn: 'Add',
@@ -298,10 +336,18 @@ export const TRANSLATIONS = {
     appTitle: 'অ্যালার্ম',
     settingsTitle: 'সেটিংস',
     noAlarmsTitle: 'কোনো অ্যালার্ম নেই',
-    noAlarmsSub: 'নতুন অ্যালার্ম যোগ করতে + বাটনে ট্যাপ করুন',
+    noAlarmsSub: 'নতুন অ্যালার্ম সেট করতে + বাটনে ট্যাপ করুন',
     powerNapLabel: 'পাওয়ার ন্যাপ',
     powerNapButtonShort: (mins: number) => `${formatNumberLocalized(mins, 'bn')} মিঃ ন্যাপ`,
-    powerNapHint: 'সময় বদলাতে চাপ দিয়ে ধরে রাখুন',
+    powerNapHint: 'সময় বদলাতে ধরে রাখুন',
+    powerNapTapToCancel: 'বাতিল করতে ট্যাপ করুন',
+    cancelPowerNapTitle: 'পাওয়ার ন্যাপ বাতিল করবেন?',
+    cancelPowerNapBody: 'আপনার চলমান পাওয়ার ন্যাপ টাইমারটি বন্ধ হয়ে যাবে।',
+    keepNapBtn: 'চালু রাখুন',
+    cancelNapBtn: 'বাতিল করুন',
+    powerNapStartedToast: (mins: number) =>
+      `${formatNumberLocalized(mins, 'bn')} মিনিটের পাওয়ার ন্যাপ সেট হয়েছে`,
+    powerNapCancelledToast: 'পাওয়ার ন্যাপ বাতিল করা হয়েছে',
 
     // Periods & Days
     am: 'এএম',
@@ -330,11 +376,11 @@ export const TRANSLATIONS = {
     newAlarmTitle: 'নতুন অ্যালার্ম',
     editAlarmTitle: 'অ্যালার্ম এডিট',
     cancel: 'বাতিল',
-    save: 'সেভ করুন',
-    saveChanges: 'সেভ করুন',
+    save: 'সেভ',
+    saveChanges: 'সেভ',
     delete: 'মুছে ফেলুন',
     done: 'ঠিক আছে',
-    alarmLabelPlaceholder: 'অ্যালার্মের নাম (ঐচ্ছিক)',
+    alarmLabelPlaceholder: 'অ্যালার্মের নাম',
 
     // Modes
     modeSingle: 'একবার',
@@ -356,28 +402,30 @@ export const TRANSLATIONS = {
 
     // Escalating Info Banner
     escalatingModeActiveTitle: 'ধাপে ধাপে ঘন অ্যালার্ম চালু',
-    escalatingModeDesc: 'সময়ের সাথে অ্যালার্মের বিরতি নিজে থেকেই কমতে থাকবে: ১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি',
+    escalatingModeDesc:
+      'সময়ের সাথে অ্যালার্মের বিরতি কমতে থাকবে: ১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি',
     escalatingWindowDesc:
       'শেষের সময় যত কাছে আসবে, অ্যালার্ম তত ঘন ঘন বাজবে (২০মি → ১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি)',
     generatesNAlarms: (count: number) => `মোট ${formatNumberLocalized(count, 'bn')}বার বাজবে`,
 
     // Granular Sequence Section
-    alarmSequenceTitle: (count: number) => `অ্যালার্মের তালিকা (${formatNumberLocalized(count, 'bn')}টি)`,
+    alarmSequenceTitle: (count: number) =>
+      `অ্যালার্মের তালিকা (${formatNumberLocalized(count, 'bn')}টি)`,
     alarmSequencePartialTitle: (enabled: number, total: number) =>
       `অ্যালার্মের তালিকা (${formatNumberLocalized(total, 'bn')}টির মধ্যে ${formatNumberLocalized(enabled, 'bn')}টি চালু)`,
     alarmSequenceHint:
-      'যেকোনো সময়ের ওপর ট্যাপ করে টাইম বদলান, অথবা পাশের সুইচ দিয়ে নির্দিষ্ট অ্যালার্ম চালু বা বন্ধ করুন।',
-    resetCustomTimings: 'আগের সময়ে ফিরিয়ে নিন',
+      'সময়ের ওপর ট্যাপ করে টাইম বদলান, অথবা পাশের বাটন দিয়ে নির্দিষ্ট অ্যালার্ম চালু বা বন্ধ করুন।',
+    resetCustomTimings: 'রিসেট করুন',
     stepStart: 'শুরু',
     stepEnd: 'শেষ',
     stepTarget: 'মূল সময়',
-    stepN: (n: number) => `${formatNumberLocalized(n, 'bn')} নং ধাপ`,
+    stepN: (n: number) => `${formatNumberLocalized(n, 'bn')} নং অ্যালার্ম`,
     adjustStepN: (n: number) => `${formatNumberLocalized(n, 'bn')} নং অ্যালার্মের সময়`,
 
     // Clock & Keypad Input
     ringsInShort: 'বাজবে',
-    selectTime: 'সময় ঠিক করুন',
-    typeInTime: 'সময় লিখে দিন',
+    selectTime: 'ঠিক আছে',
+    typeInTime: 'সময় লিখুন',
     hourLabel: 'ঘণ্টা',
     minuteLabel: 'মিনিট',
     useKeyboardTooltip: 'কিপ্যাডে সময় লিখুন',
@@ -385,22 +433,22 @@ export const TRANSLATIONS = {
 
     // Ringing Overlay
     ringingNow: 'অ্যালার্ম বাজছে',
-    defaultIntervalAlarmTitle: 'একটানা অ্যালার্ম',
+    defaultIntervalAlarmTitle: 'অ্যালার্ম',
     intervalCascadeSub: (mins: number) =>
       `${formatNumberLocalized(mins, 'bn')} মিনিট পরপর অ্যালার্ম`,
     escalatingCascadeSub: 'ধাপে ধাপে ঘন অ্যালার্ম',
-    snoozeBtn: (mins: number) => `আরও ${formatNumberLocalized(mins, 'bn')} মিনিট পর (Snooze)`,
-    dismissAlarmBtn: 'অ্যালার্ম বন্ধ করুন',
+    snoozeBtn: (mins: number) => `${formatNumberLocalized(mins, 'bn')} মিঃ পর (Snooze)`,
+    dismissAlarmBtn: 'বন্ধ করুন',
 
     // Power Nap Preset Modal
     powerNapPresetTitle: 'পাওয়ার ন্যাপের সময়',
     powerNapPresetDesc:
-      'হোম স্ক্রিনের পাওয়ার ন্যাপ বাটনে ট্যাপ করলেই কত মিনিটের অ্যালার্ম সেট হবে তা এখান থেকে ঠিক করে রাখুন।',
-    quickPresetsLabel: 'সহজ অপশন',
+      'পাওয়ার ন্যাপের সময় বেছে নিন। হোম স্ক্রিনের ন্যাপ বাটনে ট্যাপ করলেই টাইমার শুরু হবে, আর ধরে রাখলে সময় বদলানো যাবে।',
+    quickPresetsLabel: 'সময় বেছে নিন',
     customDurationLabel: 'নিজের মতো সময় দিন (মিনিট)',
     savePresetBtn: 'সেভ করুন',
     startNapNowBtn: (mins: number) =>
-      `এখনই ${formatNumberLocalized(mins, 'bn')} মিনিটের ন্যাপ নিন`,
+      `এখনই ${formatNumberLocalized(mins, 'bn')} মিঃ ন্যাপ নিন`,
 
     // Settings Modal
     sectionAppearance: 'থিম ও ভাষা',
@@ -412,128 +460,160 @@ export const TRANSLATIONS = {
     langBangla: 'বাংলা',
 
     sectionAlarmType: 'অ্যালার্ম বাজার ধরন',
-    intervalAlarmTypeLabel: 'অ্যালার্ম কীভাবে বাজবে',
+    intervalAlarmTypeLabel: 'অ্যালার্মের বিরতির ধরন',
     selectAlarmTypeModalTitle: 'অ্যালার্ম বাজার ধরন বেছে নিন',
     selectAlarmTypeModalDesc:
-      'সময়সীমা এবং আগে/পরে মোডে অ্যালার্মগুলো কতক্ষণ পরপর বাজবে তা ঠিক করুন।',
-    typeStandardTitle: 'নির্দিষ্ট বিরতিতে (সাধারণ)',
+      'সময়সীমা এবং আগে/পরে মোডে অ্যালার্মগুলো কতক্ষণ পরপর বাজবে তা বেছে নিন।',
+    typeStandardTitle: 'নির্দিষ্ট বিরতি (সাধারণ)',
     typeStandardShort: 'সাধারণ',
     typeStandardDesc:
-      'আপনার ঠিক করে দেওয়া নির্দিষ্ট মিনিট পরপর এবং নির্দিষ্ট সংখ্যক বার অ্যালার্ম বাজবে।',
+      'আপনার দেওয়া নির্দিষ্ট মিনিট পরপর এবং নির্দিষ্ট সংখ্যক বার অ্যালার্ম বাজবে।',
     typeEscalatingTitle: 'ধাপে ধাপে ঘন অ্যালার্ম',
     typeEscalatingShort: 'ধাপে ধাপে ঘন',
     typeEscalatingDesc:
-      'আলাদা করে মিনিট বা সংখ্যা দিতে হবে না — সময় যত ঘনিয়ে আসবে, অ্যালার্ম নিজে থেকেই তত ঘন ঘন বাজতে থাকবে (১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি)।',
+      'সময় যত কাছে আসবে, অ্যালার্ম নিজে থেকেই তত ঘন ঘন বাজবে (১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি)।',
 
-    sectionDefaults: 'ডিফল্ট সময় ও নিয়ম',
-    defaultIntervalLabel: 'কতক্ষণ পরপর বাজবে',
-    defaultStepsLabel: 'কয়বার বাজবে (আগে/পরে)',
-    defaultWindowDurationLabel: 'শুরু ও শেষের ব্যবধান',
-    defaultDirectionLabel: 'কখন বাজবে (আগে/পরে)',
-    defaultSnoozeLabel: 'স্নুজ (Snooze) সময়',
-    defaultPowerNapLabel: 'পাওয়ার ন্যাপের সময়',
+    sectionDefaults: 'ডিফল্ট সময়',
+    defaultIntervalLabel: 'ডিফল্ট বিরতি',
+    defaultStepsLabel: 'ডিফল্ট অ্যালার্ম সংখ্যা',
+    defaultWindowDurationLabel: 'ডিফল্ট সময়সীমা',
+    defaultDirectionLabel: 'ডিফল্ট দিক (আগে/পরে)',
+    defaultSnoozeLabel: 'ডিফল্ট স্নুজ সময়',
+    defaultPowerNapLabel: 'ডিফল্ট পাওয়ার ন্যাপ',
 
-    sectionFeatures: 'স্ক্রিন ও সুবিধাসমূহ',
-    toggleSequenceTitle: 'সবগুলো অ্যালার্মের তালিকা দেখান',
+    sectionFeatures: 'সুবিধাসমূহ',
+    toggleSequenceTitle: 'অ্যালার্মের তালিকা দেখান',
     toggleSequenceDesc:
-      'অ্যালার্ম এডিট করার সময় ভেতরের প্রতিটি ধাপের সময় আলাদাভাবে দেখার ও বন্ধ করার অপশন রাখুন',
-    toggleCreationControlsTitle: 'তৈরির সময় বিস্তারিত অপশন দেখান',
+      'অ্যালার্ম এডিট করার সময় প্রতিটি ধাপের সময় আলাদাভাবে দেখার ও বন্ধ করার অপশন রাখুন।',
+    toggleCreationControlsTitle: 'তৈরির সময় বাড়তি অপশন দেখান',
     toggleCreationControlsDesc:
-      'নতুন অ্যালার্ম সেট করার সময় বিরতি ও ধাপের সংখ্যা সরাসরি দেখান (বন্ধ থাকলে ডিফল্ট নিয়ম কাজ করবে)',
+      'নতুন অ্যালার্ম তৈরির সময় বিরতি ও সংখ্যা পরিবর্তনের অপশন সরাসরি দেখান।',
     toggleKeypadInputTitle: 'কিপ্যাডে সময় লেখা',
-    toggleKeypadInputDesc:
-      'ঘড়ির স্ক্রিনে নাম্বার কিপ্যাড দিয়ে সময় লেখার অপশন রাখুন',
+    toggleKeypadInputDesc: 'নাম্বার কিপ্যাড দিয়ে সময় লেখার অপশন রাখুন।',
     togglePowerNapTitle: 'পাওয়ার ন্যাপ বাটন দেখান',
-    togglePowerNapDesc: 'হোম স্ক্রিনে নিচে ছোট ঘুমের (Power Nap) বাটনটি রাখুন',
-    toggleToastsTitle: 'অ্যালার্ম সেট হওয়ার মেসেজ দেখান',
-    toggleToastsDesc: 'অ্যালার্ম চালু বা সেভ করলে কতক্ষণ পর বাজবে তার মেসেজ দেখান',
-    resetSettingsBtn: 'সব সেটিংস আগের অবস্থায় ফিরিয়ে নিন',
+    togglePowerNapDesc: 'হোম স্ক্রিনে নিচে পাওয়ার ন্যাপ বাটনটি রাখুন।',
+    toggleToastsTitle: 'নিশ্চিতকরণ মেসেজ দেখান',
+    toggleToastsTitleShort: 'নিশ্চিতকরণ মেসেজ',
+    toggleToastsDesc: 'অ্যালার্ম সেভ বা চালু করলে কতক্ষণ পর বাজবে তার মেসেজ দেখান।',
+    resetSettingsBtn: 'ডিফল্ট সেটিংসে ফিরিয়ে নিন',
+    viewSourceCodeBtn: 'সোর্স কোড দেখুন',
 
-    // 1a. Live Countdown & Header Sleep Window
+    // Settings ? Tooltips
+    tooltipTheme: 'ডার্ক মোড (রাতের জন্য আরামদায়ক) এবং লাইট মোডের মধ্যে পরিবর্তন করুন।',
+    tooltipLanguage: 'অ্যাপের ভাষা ইংরেজি বা বাংলায় পরিবর্তন করুন।',
+    tooltipSafetyCheck:
+      'অ্যালার্ম ঠিকমতো বাজার জন্য প্রয়োজনীয় পারমিশন চালু আছে কি না তা সেটিংস আইকনের পাশে দেখাবে।',
+    tooltipVolumeButtons:
+      'অ্যালার্ম বাজার সময় ফোনের ভলিউম বাটন চাপলে কী হবে তা ঠিক করুন।',
+    tooltipEarlyDismiss:
+      'অ্যালার্ম বাজার আগে ঘুম ভেঙে গেলে আজকের মতো অ্যালার্মটি বন্ধ করার কার্ড দেখাবে।',
+    tooltipCategories:
+      'অ্যালার্মগুলো আলাদা ক্যাটাগরিতে সাজাতে নতুন নাম যোগ বা বাদ দিন।',
+    tooltipAlarmType:
+      'নির্দিষ্ট মিনিট পরপর বাজবে নাকি সময়ের সাথে ঘন ঘন বাজবে তা বেছে নিন।',
+    tooltipDefaultSnooze: 'স্নুজ বাটনে ট্যাপ করলে কত মিনিট পর আবার অ্যালার্ম বাজবে।',
+    tooltipDefaultInterval: 'একটি অ্যালার্ম থেকে পরের অ্যালার্মের মাঝখানের ডিফল্ট বিরতি।',
+    tooltipDefaultSteps: 'আগে/পরে মোডে ডিফল্ট কয়টি অ্যালার্ম তৈরি হবে।',
+    tooltipDefaultWindow: 'সময়সীমা মোডে শুরু ও শেষ সময়ের মাঝখানের ডিফল্ট ব্যবধান।',
+    tooltipDefaultDirection: 'মূল সময়ের আগে নাকি পরে অ্যালার্মগুলো বাজবে।',
+    tooltipDefaultPowerNap: 'হোম স্ক্রিনের পাওয়ার ন্যাপ বাটনে ট্যাপ করলে ডিফল্ট কত মিনিটের ন্যাপ শুরু হবে।',
+    tooltipShowSequence:
+      'অ্যালার্ম এডিট করার সময় ভেতরের সবগুলো অ্যালার্মের তালিকা দেখাবে।',
+    tooltipShowAdvanced:
+      'নতুন অ্যালার্ম সেট করার স্ক্রিনেই বিরতি ও সংখ্যা পরিবর্তনের অপশন দেখাবে।',
+    tooltipShowPowerNap: 'হোম স্ক্রিনে পাওয়ার ন্যাপ বাটনটি দেখাবে বা লুকিয়ে রাখবে।',
+    tooltipShowToasts: 'অ্যালার্ম চালু বা সেভ করলে নিচে নিশ্চিতকরণ মেসেজ দেখাবে।',
+
+    // Header Safety Status Icon Messages
     noUpcomingAlarms: 'কোনো অ্যালার্ম চালু নেই',
     nextAlarmPrefix: 'পরেরটা',
     nextAlarmHeaderBadge: (countdown: string, timeStr: string) =>
       `পরেরটা: ${countdown} • ${timeStr}`,
-
-    // 1b. Pre-Sleep Safety Check
-    allSystemsGo: 'সব ঠিক আছে • নিশ্চিন্তে ঘুমান',
-    safetyAllSystemsGo: 'সব ঠিক আছে • নিশ্চিন্তে ঘুমান',
+    allSystemsGo: 'সব কিছু ঠিকমতো সেটআপ করা আছে! অ্যালার্ম সময়মতো বাজবে।',
+    safetyAllSystemsGo: 'সব কিছু ঠিকমতো সেটআপ করা আছে! অ্যালার্ম সময়মতো বাজবে।',
+    safetyPermissionsNeeded: 'অ্যালার্ম ঠিকমতো বাজতে নোটিফিকেশন পারমিশন দিন।',
     safetyBatteryLowPrefix: 'ব্যাটারি কম',
-    safetyBatteryLowSuffix: '। সময়মতো অ্যালার্ম বাজতে চার্জে দিন',
-    safetyVolumeLow: 'অ্যালার্মের সাউন্ড কম। শব্দ বাড়িয়ে নিন',
-    safetyNotificationsBlocked:
-      'নোটিফিকেশন বন্ধ আছে। অ্যালার্ম বাজতে পারমিশন দিন',
+    safetyBatteryLowSuffix: '। সময়মতো অ্যালার্ম বাজতে চার্জে দিন।',
+    safetyVolumeLow: 'অ্যালার্মের সাউন্ড কম। শব্দ বাড়িয়ে নিন।',
+    safetyNotificationsBlocked: 'নোটিফিকেশন বন্ধ আছে। চালু করতে ট্যাপ করুন।',
     batteryLowWarn: (pct: number) =>
-      `ফোনের চার্জ কম (${formatNumberLocalized(pct, 'bn')}%)। অ্যালার্ম মিস না করতে চার্জে লাগান`,
+      `ফোনের চার্জ কম (${formatNumberLocalized(pct, 'bn')}%)। চার্জে লাগান।`,
     volumeLowWarn: (pct: number) =>
-      `অ্যালার্মের সাউন্ড কম (${formatNumberLocalized(pct, 'bn')}%)। শব্দ বাড়িয়ে নিন`,
-    notificationsBlockedWarn:
-      'নোটিফিকেশন বন্ধ আছে। অ্যালার্ম শুনতে এখানে ট্যাপ করে চালু করুন',
+      `অ্যালার্মের সাউন্ড কম (${formatNumberLocalized(pct, 'bn')}%)। শব্দ বাড়িয়ে নিন।`,
+    notificationsBlockedWarn: 'নোটিফিকেশন বন্ধ আছে। চালু করতে ট্যাপ করুন।',
 
-    // 2a. Early Dismissal ("I'm Already Awake")
+    // Early Dismissal ("I'm Already Awake")
     earlyDismissTitle: (label: string, mins: number) =>
       `আর ${formatNumberLocalized(mins, 'bn')} মিনিট পর ${label || 'অ্যালার্ম'} বাজবে`,
     earlyDismissAction: 'ঘুম ভেঙে গেছে (আজকের মতো বন্ধ করুন)',
     earlyDismissBannerTitle: (label: string, mins: number) =>
-      `আর ${formatNumberLocalized(mins, 'bn')} মিনিট পর ${label || 'অ্যালার্ম'} — ঘুম ভেঙে গেছে`,
-    earlyDismissBannerSub: 'ট্যাপ করলে শুধু আজকের মতো অ্যালার্মটি বন্ধ হবে, পরের দিন যথানিয়মে বাজবে',
+      `আর ${formatNumberLocalized(mins, 'bn')} মিনিট পর ${label || 'অ্যালার্ম'} — ঘুম ভেঙে গেছে?`,
+    earlyDismissBannerSub: 'ট্যাপ করলে শুধু আজকের মতো বন্ধ হবে, পরের দিন যথানিয়মে বাজবে',
     earlyDismissConfirmToast: 'আজকের অ্যালার্মটি বন্ধ করা হয়েছে',
 
-    // 2b. Skip Next Occurrence
+    // Skip Next Occurrence
     skipNextBtn: 'পরের বার বাজবে না',
     resumeNextBtn: 'যথানিয়মে চালু রাখুন',
     skippingNextPrefix: 'পরের বার বন্ধ:',
     resumedScheduleToast: 'অ্যালার্ম আবার আগের নিয়মে চালু হয়েছে',
     skippingNextBadge: (dateLabel: string) => `পরের বার বন্ধ: ${dateLabel}`,
+    pausedFor24hBadge: '২৪ ঘণ্টার জন্য বন্ধ',
 
-    // 2c. Categories & Group Toggles
+    // Categories & 24h Group Pause
     categoryLabel: 'ক্যাটাগরি',
     categoryAll: 'সবগুলো',
     categoryNone: 'কিছু না',
-    groupToggleBtnOn: (cat: string) => `সব ${cat} চালু করুন`,
-    groupToggleBtnOff: (cat: string) => `সব ${cat} বন্ধ করুন`,
-    groupToggleActionOn: (cat: string) => `সব ${cat} চালু করুন`,
-    groupToggleActionOff: (cat: string) => `সব ${cat} বন্ধ করুন`,
+    groupToggleBtnOn: (cat: string) => `সব ${cat} অ্যালার্ম চালু করুন`,
+    groupToggleBtnOff: (cat: string) => `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করুন`,
+    groupToggleActionOn: (cat: string) => `সব ${cat} অ্যালার্ম চালু করুন`,
+    groupToggleActionOff: (cat: string) => `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করুন`,
     groupToggleConfirmTitle: (cat: string, enable: boolean) =>
-      `সব ${cat} অ্যালার্ম ${enable ? 'চালু' : 'বন্ধ'} করবেন?`,
+      enable
+        ? `সব ${cat} অ্যালার্ম চালু করবেন?`
+        : `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করবেন?`,
     groupToggleModalTitle: (cat: string, enable: boolean) =>
-      `সব ${cat} অ্যালার্ম ${enable ? 'চালু' : 'বন্ধ'} করবেন?`,
+      enable
+        ? `সব ${cat} অ্যালার্ম চালু করবেন?`
+        : `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করবেন?`,
     groupToggleConfirmDesc: (cat: string, count: number, enable: boolean) =>
-      `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম একসাথে ${
-        enable ? 'চালু' : 'বন্ধ'
-      } হয়ে যাবে।`,
+      enable
+        ? `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম এখনই চালু হয়ে যাবে।`
+        : `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(
+            count,
+            'bn'
+          )}টি) অ্যালার্ম আগামী ২৪ ঘণ্টার জন্য বন্ধ থাকবে এবং এরপর নিজে থেকেই আবার চালু হবে।`,
     groupToggleModalBody: (cat: string, count: number, enable: boolean) =>
-      `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম একসাথে ${
-        enable ? 'চালু' : 'বন্ধ'
-      } হয়ে যাবে।`,
+      enable
+        ? `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম এখনই চালু হয়ে যাবে।`
+        : `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(
+            count,
+            'bn'
+          )}টি) অ্যালার্ম আগামী ২৪ ঘণ্টার জন্য বন্ধ থাকবে এবং এরপর নিজে থেকেই আবার চালু হবে।`,
     cancelBtn: 'বাতিল',
     confirmBtn: 'হ্যাঁ, করুন',
     confirmActionBtn: 'হ্যাঁ, করুন',
 
-    // 3b. Hardware Volume Buttons & Safety Settings
-    sectionHardware: 'ভলিউম বাটন ও ঘুমের সুবিধা',
-    sectionSafetyAndHardware: 'ভলিউম বাটন ও সতর্কবার্তা',
-    volumeButtonsLabel: 'ভলিউম বাটন চাপলে (বাজার সময়)',
-    volumeButtonActionLabel: 'ফোনের ভলিউম বাটনের কাজ',
-    volumeButtonActionDesc:
-      'অ্যালার্ম বাজার সময় ফোনের ভলিউম বাটন চাপলে কী হবে তা ঠিক করুন',
+    // Hardware Volume Buttons & Safety Settings
+    sectionHardware: 'নিরাপত্তা ও কন্ট্রোল',
+    sectionSafetyAndHardware: 'নিরাপত্তা ও কন্ট্রোল',
+    volumeButtonsLabel: 'ভলিউম বাটন',
+    volumeButtonActionLabel: 'ভলিউম বাটনের কাজ (বাজার সময়)',
+    volumeButtonActionDesc: 'অ্যালার্ম বাজার সময় ফোনের ভলিউম বাটন চাপলে কী হবে তা ঠিক করুন।',
     volumeActionSnooze: 'স্নুজ হবে',
     volumeActionDismiss: 'বন্ধ হবে',
     volumeActionNone: 'কিছু হবে না',
     volumeRingingHintSnooze: 'ভলিউম বাটন চাপলে স্নুজ হবে',
     volumeRingingHintDismiss: 'ভলিউম বাটন চাপলে অ্যালার্ম বন্ধ হবে',
-    earlyDismissWindowLabel: "'ঘুম ভেঙে গেছে' অপশন দেখানোর সময়",
+    earlyDismissWindowLabel: 'আগাম বন্ধ করার সময়সীমা',
     earlyDismissWindowDesc:
-      'অ্যালার্ম বাজার কতক্ষণ আগে থেকে আজকের অ্যালার্ম আগাম বন্ধ করার কার্ডটি দেখাবে',
-    safetyCheckToggleTitle: 'ঘুমানোর আগে চার্জ ও সাউন্ড চেক',
-    safetyCheckToggleDesc:
-      'ফোনের চার্জ ২০% এর কম বা ভলিউম কমানো থাকলে স্ক্রিনে সতর্কবার্তা দেখাবে',
-    toggleSafetyCheckTitle: 'ঘুমানোর আগে চার্জ ও সাউন্ড চেক',
-    toggleSafetyCheckDesc:
-      'ফোনের চার্জ ২০% এর কম, ভলিউম ৩০% এর নিচে বা নোটিফিকেশন বন্ধ থাকলে সতর্ক করবে',
+      'অ্যালার্ম বাজার কতক্ষণ আগে থেকে "ঘুম ভেঙে গেছে?" কার্ডটি দেখাবে।',
+    safetyCheckToggleTitle: 'পারমিশন ও সিস্টেম চেক',
+    safetyCheckToggleDesc: 'সেটিংস আইকনের পাশে পারমিশন স্ট্যাটাস আইকন দেখাবে।',
+    toggleSafetyCheckTitle: 'পারমিশন ও সিস্টেম চেক',
+    toggleSafetyCheckDesc: 'সেটিংস আইকনের পাশে পারমিশন স্ট্যাটাস আইকন দেখাবে।',
 
-    // 6a & 8. Duplicate, Swipe & Undo
-    duplicateAlarmBtn: 'হুবহু আরেকটি তৈরি করুন',
+    // Duplicate, Swipe & Undo
+    duplicateAlarmBtn: 'কপি করুন',
     copySuffix: '(কপি)',
     editAction: 'এডিট',
     deleteAction: 'মুছে ফেলুন',
@@ -541,16 +621,16 @@ export const TRANSLATIONS = {
     swipeDeleteBtn: 'মুছুন',
     alarmDeletedToast: 'অ্যালার্ম মুছে ফেলা হয়েছে',
     alarmRestoredToast: 'অ্যালার্ম ফিরিয়ে আনা হয়েছে',
-    alarmDuplicatedToast: 'একই রকম আরেকটি অ্যালার্ম তৈরি হয়েছে',
+    alarmDuplicatedToast: 'আরেকটি কপি তৈরি হয়েছে',
     undoBtn: 'ফিরিয়ে আনুন',
     cardActionsTitle: 'অ্যালার্মের অপশন',
 
     // Categories Management in Settings
-    sectionCategories: 'ক্যাটাগরি সাজান',
-    manageCategoriesDesc:
-      'অ্যালার্মগুলো আলাদা করে রাখতে এবং এক ট্যাপে চালু/বন্ধ করতে নিজের মতো ক্যাটাগরি যোগ বা বাদ দিন।',
-    newCategoryPlaceholder: 'নতুন ক্যাটাগরির নাম লিখুন...',
-    addCategoryPlaceholder: 'নতুন ক্যাটাগরির নাম লিখুন...',
+    sectionCategories: 'ক্যাটাগরি',
+    categoriesManageLabel: 'অ্যালার্ম ক্যাটাগরি',
+    manageCategoriesDesc: 'অ্যালার্মগুলো আলাদা করে রাখতে ক্যাটাগরি যোগ বা বাদ দিন।',
+    newCategoryPlaceholder: 'নতুন ক্যাটাগরির নাম...',
+    addCategoryPlaceholder: 'নতুন ক্যাটাগরির নাম...',
     addCategoryBtn: 'যোগ করুন',
   },
 } as const;

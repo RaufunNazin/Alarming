@@ -8,8 +8,8 @@ import {
   PanResponder,
   Modal,
   Platform,
+  Pressable,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import {
   Flame,
   Trash2,
@@ -18,7 +18,7 @@ import {
   CalendarOff,
   CalendarCheck,
   Tag,
-  X,
+  Power,
 } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { useTranslation } from '../../../core/i18n/translations';
@@ -30,6 +30,7 @@ import {
   getSmartScheduleString,
 } from '../engine/intervalEngine';
 import { SquircleToggleButton } from './SquircleToggleButton';
+import { useSheetModalGesture } from './useSheetModalGesture';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface AlarmCardItemProps {
@@ -56,9 +57,16 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   const { t, language } = useTranslation();
 
   const [showQuickMenu, setShowQuickMenu] = useState(false);
+  const { translateY: quickMenuTranslateY, dragHandlePanHandlers } = useSheetModalGesture(
+    showQuickMenu,
+    () => setShowQuickMenu(false)
+  );
   const translateX = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(1)).current;
   const hapticFiredRef = useRef(false);
+
+  const isPausedFor24h = Boolean(alarm.pausedUntil && alarm.pausedUntil > Date.now());
+  const isEffectivelyEnabled = alarm.isEnabled && !isPausedFor24h;
 
   const scheduleStr = useMemo(
     () => getSmartScheduleString(alarm),
@@ -165,7 +173,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
             style={[
               styles.modeSubText,
               {
-                color: alarm.isEnabled ? colors.primaryLight : colors.textMuted,
+                color: isEffectivelyEnabled ? colors.primaryLight : colors.textMuted,
                 fontFamily: typography.sansMedium,
               },
             ]}
@@ -189,7 +197,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
           style={[
             styles.modeSubText,
             {
-              color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
+              color: isEffectivelyEnabled ? colors.textSecondary : colors.textMuted,
               fontFamily: typography.sansRegular,
             },
           ]}
@@ -216,12 +224,14 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
             styles.cardContainer,
             shadows.card,
             {
-              backgroundColor: alarm.isEnabled ? colors.cardOnBg : colors.cardOffBg,
-              borderColor: alarm.isEnabled ? colors.cardOnBorder : colors.cardOffBorder,
+              backgroundColor: isEffectivelyEnabled ? colors.cardOnBg : colors.cardOffBg,
+              borderColor: isEffectivelyEnabled
+                ? colors.cardOnBorder
+                : colors.cardOffBorder,
               borderRadius: radii.cardOuter,
               paddingVertical: 18,
               paddingHorizontal: 18,
-              opacity: themeMode === 'dark' ? (alarm.isEnabled ? 1 : 0.65) : 1,
+              opacity: themeMode === 'dark' ? (isEffectivelyEnabled ? 1 : 0.65) : 1,
               transform: [{ translateX }],
             },
           ]}
@@ -241,7 +251,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   style={[
                     styles.scheduleText,
                     {
-                      color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
+                      color: isEffectivelyEnabled ? colors.textPrimary : colors.textMuted,
                       fontFamily: typography.numbersBold,
                     },
                   ]}
@@ -262,7 +272,9 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       style={[
                         styles.labelText,
                         {
-                          color: alarm.isEnabled ? colors.textSecondary : colors.textMuted,
+                          color: isEffectivelyEnabled
+                            ? colors.textSecondary
+                            : colors.textMuted,
                           fontFamily: typography.numbersRegular,
                         },
                       ]}
@@ -280,7 +292,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       {
                         backgroundColor: colors.accentSoft,
                         borderColor: colors.accent + '45',
-                        borderRadius: radii.pill,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
@@ -304,7 +316,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   {
                     fontSize: 22,
                     lineHeight: 28,
-                    color: alarm.isEnabled ? colors.textPrimary : colors.textMuted,
+                    color: isEffectivelyEnabled ? colors.textPrimary : colors.textMuted,
                     fontFamily: typography.numbersBold,
                   },
                 ]}
@@ -316,6 +328,35 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
               </Text>
 
               {renderModeSubtitle()}
+
+              {/* 24-Hour Paused Visible Indicator */}
+              {isPausedFor24h ? (
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    safeHaptics.selectionAsync();
+                    handleToggle();
+                  }}
+                  style={[
+                    styles.skipBadge,
+                    {
+                      backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                      borderColor: 'rgba(245, 158, 11, 0.40)',
+                      borderRadius: radii.chip,
+                    },
+                  ]}
+                >
+                  <Power size={11} color="#F59E0B" />
+                  <Text
+                    style={[
+                      styles.skipBadgeText,
+                      { color: '#F59E0B', fontFamily: typography.sansBold },
+                    ]}
+                  >
+                    {t.pausedFor24hBadge}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               {/* Skip Next Occurrence Visible Indicator */}
               {alarm.skipNextDate ? (
@@ -330,7 +371,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                     {
                       backgroundColor: 'rgba(245, 158, 11, 0.14)',
                       borderColor: 'rgba(245, 158, 11, 0.40)',
-                      borderRadius: radii.pill,
+                      borderRadius: radii.chip,
                     },
                   ]}
                 >
@@ -349,7 +390,10 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
 
             {/* Right Sibling: Squircle Toggle Button */}
             <View style={styles.toggleWrapper}>
-              <SquircleToggleButton isEnabled={alarm.isEnabled} onToggle={handleToggle} />
+              <SquircleToggleButton
+                isEnabled={isEffectivelyEnabled}
+                onToggle={handleToggle}
+              />
             </View>
           </View>
         </Animated.View>
@@ -357,183 +401,193 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
 
       {/* Bespoke Quick Actions Modal on Card Long-Press */}
       {showQuickMenu && (
-      <Modal
-        visible={showQuickMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowQuickMenu(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setShowQuickMenu(false)}
-          />
+        <Modal
+          visible={showQuickMenu}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowQuickMenu(false)}
+        >
           <View
             style={[
-              styles.quickSheet,
-              shadows.modal,
-              {
-                backgroundColor: colors.modalSurface,
-                borderColor: colors.surfaceBorder,
-                borderRadius: radii.cardOuter,
-              },
+              styles.modalBackdrop,
+              { backgroundColor: colors.overlayBackdrop },
             ]}
           >
-            <View style={styles.quickHeader}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.quickTitle,
-                    { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                  ]}
-                >
-                  {timeDisplay}
-                </Text>
-                <Text
-                  style={[
-                    styles.quickSubtitle,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
-                  ]}
-                >
-                  {trimmedLabel || scheduleStr}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowQuickMenu(false)}
-                style={[
-                  styles.closeIconBtn,
-                  { backgroundColor: colors.surfaceSubtle, borderRadius: radii.pill },
-                ]}
-              >
-                <X size={16} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Skip / Resume Next Occurrence */}
-            {onToggleSkipNext && (
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => {
-                  safeHaptics.selectionAsync();
-                  setShowQuickMenu(false);
-                  onToggleSkipNext(alarm.id);
-                }}
-                style={[
-                  styles.quickOptionRow,
-                  {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.button,
-                  },
-                ]}
-              >
-                {alarm.skipNextDate ? (
-                  <CalendarCheck size={18} color={colors.accent} />
-                ) : (
-                  <CalendarOff size={18} color="#F59E0B" />
-                )}
-                <Text
-                  style={[
-                    styles.quickOptionText,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {alarm.skipNextDate ? t.resumeNextBtn : t.skipNextBtn}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Duplicate / Clone Alarm */}
-            {onDuplicate && (
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => {
-                  safeHaptics.selectionAsync();
-                  setShowQuickMenu(false);
-                  onDuplicate(alarm.id);
-                }}
-                style={[
-                  styles.quickOptionRow,
-                  {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.button,
-                  },
-                ]}
-              >
-                <Copy size={18} color={colors.accent} />
-                <Text
-                  style={[
-                    styles.quickOptionText,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {t.duplicateAlarmBtn}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Edit Alarm */}
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
-                safeHaptics.selectionAsync();
-                setShowQuickMenu(false);
-                onPressCard(alarm);
-              }}
+            <Pressable
+              style={styles.backdropDismissArea}
+              onPress={() => setShowQuickMenu(false)}
+            />
+            <Animated.View
               style={[
-                styles.quickOptionRow,
+                styles.quickSheet,
+                shadows.modal,
                 {
-                  backgroundColor: colors.surfaceSubtle,
+                  backgroundColor: colors.modalSurface,
                   borderColor: colors.surfaceBorder,
-                  borderRadius: radii.button,
+                  borderTopLeftRadius: radii.modalOuter,
+                  borderTopRightRadius: radii.modalOuter,
+                  transform: [{ translateY: quickMenuTranslateY }],
                 },
               ]}
             >
-              <Edit3 size={18} color={colors.textPrimary} />
-              <Text
-                style={[
-                  styles.quickOptionText,
-                  { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                ]}
-              >
-                {t.swipeEditBtn}
-              </Text>
-            </TouchableOpacity>
+              <View {...dragHandlePanHandlers} style={styles.quickHeaderDragZone}>
+                <View
+                  style={[
+                    styles.dragHandleBar,
+                    {
+                      backgroundColor: colors.surfaceBorder,
+                      borderRadius: radii.handle,
+                    },
+                  ]}
+                />
+                <View style={styles.quickHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.quickTitle,
+                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      ]}
+                    >
+                      {timeDisplay}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.quickSubtitle,
+                        {
+                          color: colors.textSecondary,
+                          fontFamily: typography.sansRegular,
+                        },
+                      ]}
+                    >
+                      {trimmedLabel || scheduleStr}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-            {/* Delete Alarm */}
-            {onSwipeDelete && (
+              {/* Skip / Resume Next Occurrence */}
+              {onToggleSkipNext && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    safeHaptics.selectionAsync();
+                    setShowQuickMenu(false);
+                    onToggleSkipNext(alarm.id);
+                  }}
+                  style={[
+                    styles.quickOptionRow,
+                    {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.button,
+                    },
+                  ]}
+                >
+                  {alarm.skipNextDate ? (
+                    <CalendarCheck size={18} color={colors.accent} />
+                  ) : (
+                    <CalendarOff size={18} color="#F59E0B" />
+                  )}
+                  <Text
+                    style={[
+                      styles.quickOptionText,
+                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                    ]}
+                  >
+                    {alarm.skipNextDate ? t.resumeNextBtn : t.skipNextBtn}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Duplicate / Clone Alarm */}
+              {onDuplicate && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    safeHaptics.selectionAsync();
+                    setShowQuickMenu(false);
+                    onDuplicate(alarm.id);
+                  }}
+                  style={[
+                    styles.quickOptionRow,
+                    {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.button,
+                    },
+                  ]}
+                >
+                  <Copy size={18} color={colors.accent} />
+                  <Text
+                    style={[
+                      styles.quickOptionText,
+                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                    ]}
+                  >
+                    {t.duplicateAlarmBtn}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Edit Alarm */}
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => {
+                  safeHaptics.selectionAsync();
                   setShowQuickMenu(false);
-                  triggerExitDelete();
+                  onPressCard(alarm);
                 }}
                 style={[
                   styles.quickOptionRow,
                   {
-                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                    borderColor: 'rgba(239, 68, 68, 0.30)',
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.surfaceBorder,
                     borderRadius: radii.button,
                   },
                 ]}
               >
-                <Trash2 size={18} color={colors.danger} />
+                <Edit3 size={18} color={colors.textPrimary} />
                 <Text
                   style={[
                     styles.quickOptionText,
-                    { color: colors.danger, fontFamily: typography.sansBold },
+                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
                   ]}
                 >
-                  {t.swipeDeleteBtn}
+                  {t.swipeEditBtn}
                 </Text>
               </TouchableOpacity>
-            )}
+
+              {/* Delete Alarm */}
+              {onSwipeDelete && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setShowQuickMenu(false);
+                    triggerExitDelete();
+                  }}
+                  style={[
+                    styles.quickOptionRow,
+                    {
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      borderColor: 'rgba(239, 68, 68, 0.30)',
+                      borderRadius: radii.button,
+                    },
+                  ]}
+                >
+                  <Trash2 size={18} color={colors.danger} />
+                  <Text
+                    style={[
+                      styles.quickOptionText,
+                      { color: colors.danger, fontFamily: typography.sansBold },
+                    ]}
+                  >
+                    {t.swipeDeleteBtn}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </Animated.View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
       )}
     </Animated.View>
   );
@@ -618,17 +672,27 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    justifyContent: 'flex-end',
+  },
+  backdropDismissArea: {
+    flex: 1,
   },
   quickSheet: {
     width: '100%',
-    maxWidth: 360,
-    padding: 20,
-    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 32,
+    borderTopWidth: 1,
     gap: 10,
+  },
+  quickHeaderDragZone: {
+    width: '100%',
+  },
+  dragHandleBar: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    marginBottom: 14,
   },
   quickHeader: {
     flexDirection: 'row',
@@ -642,12 +706,6 @@ const styles = StyleSheet.create({
   quickSubtitle: {
     fontSize: 13,
     marginTop: 2,
-  },
-  closeIconBtn: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   quickOptionRow: {
     flexDirection: 'row',

@@ -5,16 +5,15 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  TextInput,
   Pressable,
-  KeyboardAvoidingView,
-  Platform,
+  Animated,
 } from 'react-native';
-import { Zap, X } from 'lucide-react-native';
+import { Zap } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { useTranslation } from '../../../core/i18n/translations';
 import { useAlarmStore } from '../store/alarmStore';
+import { useSheetModalGesture } from './useSheetModalGesture';
 
 interface PowerNapPresetModalProps {
   visible: boolean;
@@ -32,32 +31,18 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
   const defaultPowerNapMinutes = useSettingsStore((s) => s.defaultPowerNapMinutes);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const startPowerNap = useAlarmStore((s) => s.startPowerNap);
+  const { translateY, dragHandlePanHandlers } = useSheetModalGesture(visible, onClose);
 
   const [selectedMinutes, setSelectedMinutes] = useState(defaultPowerNapMinutes);
-  const [customText, setCustomText] = useState(String(defaultPowerNapMinutes));
 
   useEffect(() => {
     if (visible) {
       setSelectedMinutes(defaultPowerNapMinutes);
-      setCustomText(String(defaultPowerNapMinutes));
     }
   }, [visible, defaultPowerNapMinutes]);
 
   const handleSelectChip = (mins: number) => {
     setSelectedMinutes(mins);
-    setCustomText(String(mins));
-  };
-
-  const handleCustomTextChange = (text: string) => {
-    const normalized = text
-      .replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)))
-      .replace(/[^0-9]/g, '');
-    setCustomText(normalized);
-    const parsed = parseInt(normalized, 10);
-    if (!isNaN(parsed) && parsed >= 1) {
-      const clamped = Math.min(240, parsed);
-      setSelectedMinutes(clamped);
-    }
   };
 
   const handleSavePreset = () => {
@@ -69,7 +54,7 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
   const handleStartNow = () => {
     const safeMinutes = Math.max(1, Math.min(240, selectedMinutes || 20));
     void updateSettings({ defaultPowerNapMinutes: safeMinutes });
-    void startPowerNap(safeMinutes);
+    void startPowerNap(safeMinutes, true);
     onClose();
   };
 
@@ -79,65 +64,62 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType="slide"
       onRequestClose={onClose}
     >
-      <KeyboardAvoidingView
-        style={[styles.backdrop, { backgroundColor: colors.overlayBackdrop }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      <View style={[styles.backdrop, { backgroundColor: colors.overlayBackdrop }]}>
+        <Pressable style={styles.backdropDismissArea} onPress={onClose} />
 
-        <View
+        <Animated.View
           style={[
             styles.sheet,
             {
               backgroundColor: colors.surface,
               borderColor: colors.surfaceBorder,
-              borderRadius: radii.card,
+              borderTopLeftRadius: radii.modalOuter,
+              borderTopRightRadius: radii.modalOuter,
+              transform: [{ translateY }],
             },
           ]}
         >
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <View style={styles.titleRow}>
-              <View
-                style={[
-                  styles.iconBadge,
-                  { backgroundColor: colors.primaryMuted },
-                ]}
-              >
-                <Zap size={18} color={colors.primary} fill={colors.primary} />
+          {/* Drag Handle + Header */}
+          <View {...dragHandlePanHandlers} style={styles.dragArea}>
+            <View
+              style={[
+                styles.dragHandleBar,
+                { backgroundColor: colors.surfaceBorder, borderRadius: radii.handle },
+              ]}
+            />
+            <View style={styles.headerRow}>
+              <View style={styles.titleRow}>
+                <View
+                  style={[
+                    styles.iconBadge,
+                    { backgroundColor: colors.primaryMuted, borderRadius: radii.chip },
+                  ]}
+                >
+                  <Zap size={18} color={colors.primary} fill={colors.primary} />
+                </View>
+                <Text
+                  style={[
+                    styles.titleText,
+                    { color: colors.textPrimary, fontFamily: typography.sansBold },
+                  ]}
+                >
+                  {t.powerNapPresetTitle}
+                </Text>
               </View>
-              <Text
-                style={[
-                  styles.titleText,
-                  { color: colors.textPrimary, fontFamily: typography.sansBold },
-                ]}
-              >
-                {t.powerNapPresetTitle}
-              </Text>
             </View>
 
-            <TouchableOpacity
-              onPress={onClose}
+            <Text
               style={[
-                styles.closeBtn,
-                { backgroundColor: colors.surfaceSubtle, borderRadius: radii.pill },
+                styles.descText,
+                { color: colors.textSecondary, fontFamily: typography.sansRegular },
               ]}
             >
-              <X size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
+              {t.powerNapPresetDesc}
+            </Text>
           </View>
-
-          <Text
-            style={[
-              styles.descText,
-              { color: colors.textSecondary, fontFamily: typography.sansRegular },
-            ]}
-          >
-            {t.powerNapPresetDesc}
-          </Text>
 
           {/* Quick Presets */}
           <Text
@@ -186,43 +168,6 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
             })}
           </View>
 
-          {/* Custom Number Pad Input */}
-          <View style={styles.customRow}>
-            <Text
-              style={[
-                styles.customLabel,
-                { color: colors.textSecondary, fontFamily: typography.sansMedium },
-              ]}
-            >
-              {t.customDurationLabel}
-            </Text>
-            <View
-              style={[
-                styles.customInputBox,
-                {
-                  backgroundColor: colors.surfaceSubtle,
-                  borderColor: colors.surfaceBorder,
-                  borderRadius: radii.cardInner,
-                },
-              ]}
-            >
-              <TextInput
-                value={customText}
-                onChangeText={handleCustomTextChange}
-                keyboardType="number-pad"
-                maxLength={3}
-                selectTextOnFocus
-                style={[
-                  styles.customInputText,
-                  {
-                    color: colors.textPrimary,
-                    fontFamily: typography.numbersBold,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-
           {/* Action Buttons */}
           <View style={styles.actionsRow}>
             <TouchableOpacity
@@ -269,8 +214,8 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </Animated.View>
+      </View>
     </Modal>
   );
 };
@@ -278,22 +223,32 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    justifyContent: 'flex-end',
+  },
+  backdropDismissArea: {
+    flex: 1,
   },
   sheet: {
     width: '100%',
-    maxWidth: 420,
-    borderWidth: 1,
-    padding: 22,
+    borderTopWidth: 1,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 32,
+  },
+  dragArea: {
+    width: '100%',
+  },
+  dragHandleBar: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    marginBottom: 14,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   titleRow: {
     flexDirection: 'row',
@@ -303,18 +258,11 @@ const styles = StyleSheet.create({
   iconBadge: {
     width: 34,
     height: 34,
-    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
   titleText: {
     fontSize: 20,
-  },
-  closeBtn: {
-    width: 34,
-    height: 34,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   descText: {
     fontSize: 13,
@@ -329,7 +277,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 18,
+    marginBottom: 22,
   },
   chipBtn: {
     width: '23%',
@@ -340,30 +288,6 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 15,
-  },
-  customRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 22,
-  },
-  customLabel: {
-    fontSize: 14,
-    flex: 1,
-    marginRight: 12,
-  },
-  customInputBox: {
-    width: 86,
-    height: 44,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  customInputText: {
-    fontSize: 18,
-    width: '100%',
-    textAlign: 'center',
-    padding: 0,
   },
   actionsRow: {
     flexDirection: 'row',

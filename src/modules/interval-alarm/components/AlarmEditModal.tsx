@@ -8,6 +8,8 @@ import {
   ScrollView,
   TextInput,
   Pressable,
+  Animated,
+  Keyboard,
 } from 'react-native';
 import {
   Minus,
@@ -26,7 +28,6 @@ import {
   CalendarOff,
   CalendarCheck,
 } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
 import { useTheme } from '../../../core/theme';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { useTranslation } from '../../../core/i18n/translations';
@@ -39,6 +40,7 @@ import {
   formatSkippedDateLabel,
 } from '../engine/intervalEngine';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
+import { useSheetModalGesture } from './useSheetModalGesture';
 
 interface AlarmEditModalProps {
   visible: boolean;
@@ -93,6 +95,16 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
   const categories = useSettingsStore((s) => s.categories);
 
+  const { translateY, keyboardHeight, dragHandlePanHandlers } = useSheetModalGesture(
+    visible,
+    onClose
+  );
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const deleteConfirmGesture = useSheetModalGesture(showDeleteConfirm, () =>
+    setShowDeleteConfirm(false)
+  );
+
   // Internal alarm state
   const [alarmType, setAlarmType] = useState<AlarmType>('single');
   const [startHour, setStartHour] = useState(6);
@@ -112,7 +124,6 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   const [isGranularOpen, setIsGranularOpen] = useState(false);
   const [clockModalVisible, setClockModalVisible] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (visible && alarm) {
@@ -538,14 +549,25 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   return (
     <>
       <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-        <View style={[styles.modalOverlay, { backgroundColor: colors.overlayBackdrop }]}>
+        <View
+          style={[
+            styles.modalOverlay,
+            {
+              backgroundColor: colors.overlayBackdrop,
+              paddingBottom: keyboardHeight,
+            },
+          ]}
+        >
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={onClose}
+            onPress={() => {
+              Keyboard.dismiss();
+              onClose();
+            }}
             accessibilityLabel="Close edit modal"
           />
 
-          <View
+          <Animated.View
             style={[
               styles.modalContent,
               shadows.modal,
@@ -554,24 +576,32 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 borderColor: colors.surfaceBorder,
                 borderTopLeftRadius: radii.modalOuter,
                 borderTopRightRadius: radii.modalOuter,
+                transform: [{ translateY }],
               },
             ]}
-            onStartShouldSetResponder={() => true}
           >
-            {/* Top Drag Handle */}
-            <View
-              style={[
-                styles.handleBar,
-                {
-                  backgroundColor:
-                    themeMode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : colors.surfaceBorder,
-                },
-              ]}
-            />
+            {/* Top Drag Handle Zone */}
+            <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
+              <View
+                style={[
+                  styles.handleBar,
+                  {
+                    borderRadius: radii.handle,
+                    backgroundColor:
+                      themeMode === 'dark'
+                        ? 'rgba(255, 255, 255, 0.22)'
+                        : colors.surfaceBorder,
+                  },
+                ]}
+              />
+            </View>
 
             <ScrollView
+              style={styles.scrollView}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 8, paddingTop: 4 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              contentContainerStyle={{ paddingBottom: 14, paddingTop: 2 }}
             >
               {/* Selected Time Banner with "Edit" Button */}
               <View
@@ -836,7 +866,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                         styles.modeToggleTab,
                         !isEscalating && {
                           backgroundColor: colors.surfaceSubtle,
-                          borderRadius: radii.chip - 3,
+                          borderRadius: radii.chipInner,
                         },
                       ]}
                     >
@@ -859,7 +889,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                         styles.modeToggleTab,
                         isEscalating && {
                           backgroundColor: colors.primaryMuted,
-                          borderRadius: radii.chip - 3,
+                          borderRadius: radii.chipInner,
                         },
                       ]}
                     >
@@ -1457,7 +1487,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
 
@@ -1477,30 +1507,46 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
         onConfirm={handleClockConfirm}
       />
 
-      {/* Custom Styled Delete Confirmation Modal with Frosted Blur Backdrop */}
+      {/* Custom Styled Delete Confirmation Bottom Sheet Modal */}
       <Modal
         visible={showDeleteConfirm}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setShowDeleteConfirm(false)}
       >
-        <View style={styles.confirmBackdrop}>
-          <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+        <View
+          style={[
+            styles.confirmBackdrop,
+            { backgroundColor: colors.overlayBackdrop },
+          ]}
+        >
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => setShowDeleteConfirm(false)}
           />
-          <View
+          <Animated.View
+            {...deleteConfirmGesture.dragHandlePanHandlers}
             style={[
               styles.confirmCard,
               {
                 backgroundColor: colors.surfaceElevated,
                 borderColor: colors.surfaceBorder,
-                borderRadius: radii.cardOuter,
+                borderTopLeftRadius: radii.modalOuter,
+                borderTopRightRadius: radii.modalOuter,
+                transform: [{ translateY: deleteConfirmGesture.translateY }],
               },
-              shadows.card,
+              shadows.modal,
             ]}
           >
+            <View
+              style={[
+                styles.confirmDragHandle,
+                {
+                  backgroundColor: colors.surfaceBorder,
+                  borderRadius: radii.handle,
+                },
+              ]}
+            />
             <View
               style={[
                 styles.confirmIconContainer,
@@ -1583,7 +1629,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     </>
@@ -1601,7 +1647,18 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: 1,
+    overflow: 'hidden',
+  },
+  dragHandleZone: {
+    width: '100%',
     paddingTop: 12,
+    paddingBottom: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollView: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   modeToggleRow: {
     flexDirection: 'row',
@@ -1622,10 +1679,6 @@ const styles = StyleSheet.create({
   handleBar: {
     width: 40,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 16,
   },
   timeCardBanner: {
     marginHorizontal: 16,
@@ -1918,19 +1971,21 @@ const styles = StyleSheet.create({
   },
   confirmBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 28,
+    justifyContent: 'flex-end',
   },
   confirmCard: {
     width: '100%',
-    maxWidth: 340,
-    borderWidth: 1,
+    borderTopWidth: 1,
     paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
     alignItems: 'center',
+  },
+  confirmDragHandle: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   confirmIconContainer: {
     width: 52,

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AlarmItem, ActiveRingingAlarm, AlarmType } from '../types';
+import { AlarmItem, ActiveRingingAlarm, AlarmType, ActivePowerNap } from '../types';
 import { AlarmStorage } from '../../../core/storage/alarmStorage';
 import {
   scheduleAlarmsForAlarmItem,
@@ -7,6 +7,8 @@ import {
   cancelAllScheduledNotificationsForAlarm,
   dismissPresentedNotificationsForAlarm,
   checkNotificationPermissions,
+  schedulePowerNapNotification,
+  cancelPowerNapNotification,
   MAX_SCHEDULED_STEPS_PER_ALARM,
 } from '../../../core/notifications/alarmNotifier';
 import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
@@ -24,6 +26,7 @@ import { formatNumberLocalized, TRANSLATIONS } from '../../../core/i18n/translat
 
 interface AlarmState {
   alarms: AlarmItem[];
+  activePowerNap: ActivePowerNap | null;
   activeRinging: ActiveRingingAlarm | null;
   loveNoteGreeting: string;
   lastSelectedType: AlarmType;
@@ -36,7 +39,8 @@ interface AlarmState {
   // Actions
   initialize: () => Promise<void>;
   addAlarm: (alarmData: Omit<AlarmItem, 'id'>) => Promise<string>;
-  startPowerNap: (minutes?: number) => Promise<string>;
+  startPowerNap: (minutes?: number, forceReplace?: boolean) => Promise<void>;
+  cancelPowerNap: () => Promise<void>;
   updateAlarm: (id: string, updates: Partial<AlarmItem>) => Promise<void>;
   deleteAlarm: (id: string) => Promise<void>;
   softDeleteAlarm: (id: string) => Promise<void>;
@@ -100,6 +104,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
   return {
     alarms: [],
+    activePowerNap: null,
     activeRinging: null,
     loveNoteGreeting: 'Good morning, my love',
     lastSelectedType: 'single',
@@ -126,14 +131,30 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     initialize: async () => {
       if (get().isInitialized) return;
-      const [alarms, loveNoteGreeting, lastSelectedType] = await Promise.all([
+      const [alarms, loveNoteGreeting, lastSelectedType, activePowerNap] = await Promise.all([
         AlarmStorage.getAlarms(),
         AlarmStorage.getLoveNoteGreeting(),
         AlarmStorage.getLastSelectedAlarmType(),
+        AlarmStorage.getActivePowerNap(),
       ]);
 
+      const nowMs = Date.now();
+      const validPowerNap =
+        activePowerNap && activePowerNap.endsAt > nowMs - 2 * 60 * 1000
+          ? activePowerNap
+          : null;
+      if (activePowerNap && !validPowerNap) {
+        void AlarmStorage.saveActivePowerNap(null);
+      }
+
       // Render stored alarms immediately without waiting on OS notification scheduling
-      set({ alarms, loveNoteGreeting, lastSelectedType, isInitialized: true });
+      set({
+        alarms,
+        loveNoteGreeting,
+        lastSelectedType,
+        activePowerNap: validPowerNap,
+        isInitialized: true,
+      });
 
       // Synchronize active alarms in the background
       void Promise.all(
@@ -186,21 +207,69 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       return id;
     },
 
-    startPowerNap: async (minutes) => {
+    startPowerNap: async (minutes, forceReplace = false) => {
+      const existingNap = get().activePowerNap;
+      if (existingNap && existingNap.endsAt > Date.now() && !forceReplace) {
+        return;
+      }
+      if (existingNap?.notificationId) {
+        void cancelPowerNapNotification(existingNap.notificationId);
+      }
+
       const settings = useSettingsStore.getState();
       const napMinutes = minutes ?? settings.defaultPowerNapMinutes ?? 20;
-      const targetDate = new Date(Date.now() + napMinutes * 60 * 1000);
-      const label = TRANSLATIONS[settings.language].powerNapLabel;
+      const endsAt = Date.now() + napMinutes * 60 * 1000;
+      const t = TRANSLATIONS[settings.language];
 
-      return get().addAlarm({
-        type: 'single',
-        label: `${label} (${formatNumberLocalized(napMinutes, settings.language)}m)`,
-        isEnabled: true,
-        startHour: targetDate.getHours(),
-        startMinute: targetDate.getMinutes(),
-        repeatDays: [],
-        isOneOff: true,
+      const nextNap: ActivePowerNap = {
+        endsAt,
+        durationMinutes: napMinutes,
+      };
+
+      set({
+        activePowerNap: nextNap,
+        ...(settings.showToastBanners
+          ? {
+              toastMessage: t.powerNapStartedToast(napMinutes),
+              toastActionLabel: null,
+              onToastAction: null,
+            }
+          : {}),
       });
+
+      void AlarmStorage.saveActivePowerNap(nextNap);
+
+      const notifId = await schedulePowerNapNotification(endsAt, t.powerNapLabel);
+      if (notifId && get().activePowerNap?.endsAt === endsAt) {
+        const updatedNap: ActivePowerNap = { ...nextNap, notificationId: notifId };
+        set({ activePowerNap: updatedNap });
+        void AlarmStorage.saveActivePowerNap(updatedNap);
+      }
+    },
+
+    cancelPowerNap: async () => {
+      const existingNap = get().activePowerNap;
+      if (get().activeRinging?.alarm.id === 'power_nap') {
+        alarmSoundPlayer.stopAlarmSound();
+      }
+
+      const settings = useSettingsStore.getState();
+      const t = TRANSLATIONS[settings.language];
+
+      set({
+        activePowerNap: null,
+        ...(get().activeRinging?.alarm.id === 'power_nap' ? { activeRinging: null } : {}),
+        ...(settings.showToastBanners
+          ? {
+              toastMessage: t.powerNapCancelledToast,
+              toastActionLabel: null,
+              onToastAction: null,
+            }
+          : {}),
+      });
+
+      void AlarmStorage.saveActivePowerNap(null);
+      void cancelPowerNapNotification(existingNap?.notificationId);
     },
 
     setLastSelectedType: async (type) => {
@@ -244,6 +313,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       const updatedAlarm: AlarmItem = {
         ...mergedBase,
         enabledAt: scheduleChanged || newlyEnabled ? Date.now() : existing.enabledAt,
+        pausedUntil:
+          scheduleChanged || newlyEnabled
+            ? undefined
+            : 'pausedUntil' in updates
+              ? updates.pausedUntil
+              : existing.pausedUntil,
         generatedSequence:
           mergedBase.type !== 'single' ? steps.map((s) => s.timeString) : undefined,
         // If time or repeat schedule changed, reset dismissed status
@@ -511,31 +586,55 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
     toggleCategoryAlarms: async (category, enable) => {
       const currentAlarms = get().alarms;
       const matchingAlarms: AlarmItem[] = [];
+      const nowMs = Date.now();
+      const pauseUntilMs = nowMs + 24 * 60 * 60 * 1000;
 
       const updatedAlarms = currentAlarms.map((alarm) => {
         if (alarm.category === category) {
-          const updated: AlarmItem = {
-            ...alarm,
-            isEnabled: enable,
-            enabledAt: enable ? Date.now() : alarm.enabledAt,
-            dismissedForToday: false,
-            snoozedUntil: undefined,
-            notificationIds: enable ? alarm.notificationIds : [],
-          };
+          if (!enable && !alarm.isEnabled) {
+            return alarm;
+          }
+          const updated: AlarmItem = enable
+            ? {
+                ...alarm,
+                isEnabled: true,
+                pausedUntil: undefined,
+                enabledAt: nowMs,
+                dismissedForToday: false,
+                snoozedUntil: undefined,
+              }
+            : {
+                ...alarm,
+                pausedUntil: pauseUntilMs,
+                dismissedForToday: false,
+                snoozedUntil: undefined,
+              };
           matchingAlarms.push(updated);
           return updated;
         }
         return alarm;
       });
 
+      const activeRing = get().activeRinging;
+      if (!enable && activeRing && activeRing.alarm.category === category) {
+        alarmSoundPlayer.stopAlarmSound();
+      }
+
       const lang = useSettingsStore.getState().language;
       const toastMsg =
         lang === 'bn'
-          ? `সব ${category} অ্যালার্ম ${enable ? 'চালু' : 'বন্ধ'} করা হয়েছে`
-          : `${enable ? 'Enabled' : 'Turned off'} all ${category} alarms`;
+          ? enable
+            ? `সব ${category} অ্যালার্ম চালু করা হয়েছে`
+            : `সব ${category} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করা হয়েছে`
+          : enable
+            ? `Turned on all ${category} alarms`
+            : `Turned off all ${category} alarms for 24 hours`;
 
       set({
         alarms: updatedAlarms,
+        ...(!enable && activeRing && activeRing.alarm.category === category
+          ? { activeRinging: null }
+          : {}),
         toastMessage: toastMsg,
         toastActionLabel: null,
         onToastAction: null,
@@ -544,7 +643,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       void AlarmStorage.saveAlarms(updatedAlarms);
 
       for (const item of matchingAlarms) {
-        if (enable) {
+        if (item.isEnabled) {
           void syncAlarmNotificationsInBackground(item);
         } else {
           void cancelAllScheduledNotificationsForAlarm(item);
@@ -558,11 +657,13 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       if (index === -1) return;
 
       const alarm = currentAlarms[index];
-      const willEnable = !alarm.isEnabled;
+      const isPaused = Boolean(alarm.pausedUntil && alarm.pausedUntil > Date.now());
+      const willEnable = isPaused ? true : !alarm.isEnabled;
 
       const updatedAlarm: AlarmItem = {
         ...alarm,
         isEnabled: willEnable,
+        pausedUntil: undefined,
         enabledAt: willEnable ? Date.now() : alarm.enabledAt,
         dismissedForToday: false,
         snoozedUntil: undefined,
@@ -605,6 +706,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     dismissAllRemainingForToday: async (alarmId) => {
       alarmSoundPlayer.stopAlarmSound();
+      if (alarmId === 'power_nap') {
+        set({ activeRinging: null, activePowerNap: null });
+        void AlarmStorage.saveActivePowerNap(null);
+        void cancelPowerNapNotification();
+        return;
+      }
       const currentAlarms = get().alarms;
       const index = currentAlarms.findIndex((a) => a.id === alarmId);
       if (index === -1) {
@@ -643,6 +750,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     dismissSingleAlarm: async (alarmId) => {
       alarmSoundPlayer.stopAlarmSound();
+      if (alarmId === 'power_nap') {
+        set({ activeRinging: null, activePowerNap: null });
+        void AlarmStorage.saveActivePowerNap(null);
+        void cancelPowerNapNotification();
+        return;
+      }
       const active = get().activeRinging;
       const currentAlarms = get().alarms;
       const index = currentAlarms.findIndex((a) => a.id === alarmId);
@@ -718,6 +831,37 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     snoozeAlarm: async (alarmId, minutes) => {
       alarmSoundPlayer.stopAlarmSound();
+      const settings = useSettingsStore.getState();
+      const resolvedMinutes = minutes ?? settings.defaultSnoozeMinutes ?? 10;
+
+      if (alarmId === 'power_nap') {
+        const snoozedEndsAt = Date.now() + resolvedMinutes * 60 * 1000;
+        const snoozeToast =
+          settings.language === 'bn'
+            ? `আরও ${formatNumberLocalized(resolvedMinutes, 'bn')} মিনিট পর আবার বাজবে`
+            : `Snoozed for ${resolvedMinutes} minutes`;
+        const nextNap: ActivePowerNap = {
+          endsAt: snoozedEndsAt,
+          durationMinutes: resolvedMinutes,
+        };
+        set({
+          activeRinging: null,
+          activePowerNap: nextNap,
+          ...(settings.showToastBanners ? { toastMessage: snoozeToast } : {}),
+        });
+        void AlarmStorage.saveActivePowerNap(nextNap);
+        const notifId = await schedulePowerNapNotification(
+          snoozedEndsAt,
+          TRANSLATIONS[settings.language].powerNapLabel
+        );
+        if (notifId && get().activePowerNap?.endsAt === snoozedEndsAt) {
+          const updatedNap: ActivePowerNap = { ...nextNap, notificationId: notifId };
+          set({ activePowerNap: updatedNap });
+          void AlarmStorage.saveActivePowerNap(updatedNap);
+        }
+        return;
+      }
+
       const currentAlarms = get().alarms;
       const index = currentAlarms.findIndex((a) => a.id === alarmId);
       if (index === -1) {
@@ -725,8 +869,6 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         return;
       }
 
-      const settings = useSettingsStore.getState();
-      const resolvedMinutes = minutes ?? settings.defaultSnoozeMinutes ?? 10;
       const alarm = currentAlarms[index];
       const snoozedUntil = Date.now() + resolvedMinutes * 60 * 1000;
 
@@ -778,9 +920,39 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
     },
 
     triggerFromNotification: ({ alarmId, stepIndex, totalSteps, timeString, cycleDateStr }) => {
+      if (alarmId === 'power_nap') {
+        const now = new Date();
+        const lang = useSettingsStore.getState().language;
+        const syntheticNapAlarm: AlarmItem = {
+          id: 'power_nap',
+          type: 'single',
+          label: TRANSLATIONS[lang].powerNapLabel,
+          isEnabled: true,
+          startHour: now.getHours(),
+          startMinute: now.getMinutes(),
+          repeatDays: [],
+          isOneOff: true,
+        };
+        set({
+          activePowerNap: null,
+          activeRinging: {
+            alarm: syntheticNapAlarm,
+            currentStepIndex: 0,
+            totalSteps: 1,
+            currentTimeString:
+              typeof timeString === 'string'
+                ? timeString
+                : formatTime12h(now.getHours(), now.getMinutes()),
+          },
+        });
+        void AlarmStorage.saveActivePowerNap(null);
+        return;
+      }
+
       const currentAlarms = get().alarms;
       const target = currentAlarms.find((a) => a.id === alarmId);
       if (!target || !target.isEnabled) return;
+      if (target.pausedUntil && target.pausedUntil > Date.now()) return;
 
       const resolvedStepIndex = typeof stepIndex === 'number' ? stepIndex : 0;
       const resolvedTotalSteps =
@@ -808,6 +980,35 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes();
       const currentAlarms = get().alarms;
+
+      // 0. Check standalone Power Nap expiration on every 2s tick
+      const currentNap = get().activePowerNap;
+      if (currentNap && nowMs >= currentNap.endsAt) {
+        const lang = useSettingsStore.getState().language;
+        const timeStr = formatTime12h(currentHour, currentMinute);
+        const syntheticNapAlarm: AlarmItem = {
+          id: 'power_nap',
+          type: 'single',
+          label: TRANSLATIONS[lang].powerNapLabel,
+          isEnabled: true,
+          startHour: currentHour,
+          startMinute: currentMinute,
+          repeatDays: [],
+          isOneOff: true,
+        };
+        set({
+          activePowerNap: null,
+          activeRinging: {
+            alarm: syntheticNapAlarm,
+            currentTimeString: timeStr,
+            currentStepIndex: 0,
+            totalSteps: 1,
+          },
+        });
+        void AlarmStorage.saveActivePowerNap(null);
+        void cancelPowerNapNotification(currentNap.notificationId);
+        return;
+      }
 
       // 1. Fast path: check active snooze expiration on every 2s tick (O(N) integer check)
       for (const alarm of currentAlarms) {
@@ -860,15 +1061,23 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       }
 
       const todayStr = getLocalDateString(now);
-      const hasExpiredSkip = currentAlarms.some(
-        (alarm) => Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr)
+      const hasExpiredSkipOrPause = currentAlarms.some(
+        (alarm) =>
+          Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr) ||
+          Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs)
       );
 
       let cleanedAlarms = currentAlarms;
-      if (hasExpiredSkip) {
+      if (hasExpiredSkipOrPause) {
         cleanedAlarms = currentAlarms.map((alarm) => {
-          if (alarm.skipNextDate && alarm.skipNextDate < todayStr) {
-            return { ...alarm, skipNextDate: undefined };
+          const clearSkip = Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr);
+          const clearPause = Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs);
+          if (clearSkip || clearPause) {
+            return {
+              ...alarm,
+              ...(clearSkip ? { skipNextDate: undefined } : {}),
+              ...(clearPause ? { pausedUntil: undefined } : {}),
+            };
           }
           return alarm;
         });

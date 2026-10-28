@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AlarmItem, AlarmType } from '../../modules/interval-alarm/types';
+import { ActivePowerNap, AlarmItem, AlarmType } from '../../modules/interval-alarm/types';
 
 const ALARMS_STORAGE_KEY = '@alarming_alarms_list_v1';
 const LEGACY_ALARMS_STORAGE_KEY = '@amour_alarms_list_v1';
@@ -11,6 +11,7 @@ const LAST_SELECTED_TYPE_KEY = '@alarming_last_selected_alarm_type_v1';
 const LEGACY_LAST_SELECTED_TYPE_KEY = '@amour_last_selected_alarm_type_v1';
 
 const SETTINGS_STORAGE_KEY = '@alarming_settings_v1';
+const POWER_NAP_STORAGE_KEY = '@alarming_active_power_nap_v1';
 
 export const AlarmStorage = {
   async getAlarms(): Promise<AlarmItem[]> {
@@ -103,6 +104,34 @@ export const AlarmStorage = {
       await AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch (e) {
       console.warn('Error saving settings to storage:', e);
+    }
+  },
+
+  async getActivePowerNap(): Promise<ActivePowerNap | null> {
+    try {
+      const raw = await AsyncStorage.getItem(POWER_NAP_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as ActivePowerNap;
+        if (parsed && typeof parsed.endsAt === 'number' && parsed.endsAt > Date.now()) {
+          return parsed;
+        }
+        await AsyncStorage.removeItem(POWER_NAP_STORAGE_KEY);
+      }
+    } catch (e) {
+      console.warn('Error reading power nap from storage:', e);
+    }
+    return null;
+  },
+
+  async saveActivePowerNap(nap: ActivePowerNap | null): Promise<void> {
+    try {
+      if (!nap) {
+        await AsyncStorage.removeItem(POWER_NAP_STORAGE_KEY);
+      } else {
+        await AsyncStorage.setItem(POWER_NAP_STORAGE_KEY, JSON.stringify(nap));
+      }
+    } catch (e) {
+      console.warn('Error saving power nap to storage:', e);
     }
   },
 };

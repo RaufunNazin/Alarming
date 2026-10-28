@@ -8,10 +8,11 @@ import {
   StatusBar as RNStatusBar,
   Modal,
   AppState,
+  Pressable,
+  Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { Plus, Bell, Zap, Sun, Tag, Power } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../core/theme';
@@ -21,7 +22,6 @@ import { useAlarmStore } from './store/alarmStore';
 import { AlarmItem } from './types';
 import { calculateNextOccurrence, formatAlarmTimeDisplay } from './engine/intervalEngine';
 import { GreetingHeader } from './components/GreetingHeader';
-import { SafetyCheckBanner } from './components/SafetyCheckBanner';
 import { AlarmCardItem } from './components/AlarmCardItem';
 import { AlarmCreationModal } from './components/AlarmCreationModal';
 import { AlarmEditModal } from './components/AlarmEditModal';
@@ -29,12 +29,13 @@ import { AlarmRingingOverlay } from './components/AlarmRingingOverlay';
 import { AlarmToastBanner } from './components/AlarmToastBanner';
 import { SettingsModal } from './components/SettingsModal';
 import { PowerNapPresetModal } from './components/PowerNapPresetModal';
+import { useSheetModalGesture } from './components/useSheetModalGesture';
 import { safeHaptics } from '../../core/haptics/safeHaptics';
 
 export const IntervalAlarmScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { colors, typography, radii, shadows, spacing, themeMode } = useTheme();
-  const { t, language } = useTranslation();
+  const { t, language, formatNum } = useTranslation();
   const showPowerNapButton = useSettingsStore((s) => s.showPowerNapButton);
   const defaultPowerNapMinutes = useSettingsStore((s) => s.defaultPowerNapMinutes);
   const earlyDismissalWindowMinutes = useSettingsStore(
@@ -43,8 +44,10 @@ export const IntervalAlarmScreen: React.FC = () => {
   const configuredCategories = useSettingsStore((s) => s.categories);
 
   const alarms = useAlarmStore((s) => s.alarms);
+  const activePowerNap = useAlarmStore((s) => s.activePowerNap);
   const addAlarm = useAlarmStore((s) => s.addAlarm);
   const startPowerNap = useAlarmStore((s) => s.startPowerNap);
+  const cancelPowerNap = useAlarmStore((s) => s.cancelPowerNap);
   const updateAlarm = useAlarmStore((s) => s.updateAlarm);
   const deleteAlarm = useAlarmStore((s) => s.deleteAlarm);
   const softDeleteAlarm = useAlarmStore((s) => s.softDeleteAlarm);
@@ -58,12 +61,23 @@ export const IntervalAlarmScreen: React.FC = () => {
   const [editingAlarm, setEditingAlarm] = useState<AlarmItem | null>(null);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [powerNapModalVisible, setPowerNapModalVisible] = useState(false);
+  const [cancelPowerNapModalVisible, setCancelPowerNapModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [groupToggleConfirm, setGroupToggleConfirm] = useState<{
     category: string;
     enable: boolean;
   } | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const [powerNapRemainingSec, setPowerNapRemainingSec] = useState<number>(0);
+
+  const groupToggleGesture = useSheetModalGesture(
+    Boolean(groupToggleConfirm),
+    () => setGroupToggleConfirm(null)
+  );
+  const cancelPowerNapGesture = useSheetModalGesture(
+    cancelPowerNapModalVisible,
+    () => setCancelPowerNapModalVisible(false)
+  );
 
   useEffect(() => {
     const syncClockIfMinuteChanged = () => {
@@ -88,6 +102,39 @@ export const IntervalAlarmScreen: React.FC = () => {
     };
   }, []);
 
+  // Live 1-second countdown ticker while a Power Nap is active
+  useEffect(() => {
+    if (!activePowerNap) {
+      setPowerNapRemainingSec(0);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const diffSec = Math.max(0, Math.ceil((activePowerNap.endsAt - Date.now()) / 1000));
+      setPowerNapRemainingSec(diffSec);
+    };
+
+    updateRemaining();
+    const interval = setInterval(updateRemaining, 1000);
+    return () => clearInterval(interval);
+  }, [activePowerNap]);
+
+  const formattedPowerNapCountdown = useMemo(() => {
+    const totalSec = Math.max(0, powerNapRemainingSec);
+    const hrs = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    const zeroChar = formatNum(0);
+    const mm = formatNum(mins).padStart(2, zeroChar);
+    const ss = formatNum(secs).padStart(2, zeroChar);
+    if (hrs > 0) {
+      return `${formatNum(hrs)}:${mm}:${ss}`;
+    }
+    return `${mm}:${ss}`;
+  }, [powerNapRemainingSec, formatNum]);
+
+  const isPowerNapActive = Boolean(activePowerNap && powerNapRemainingSec > 0);
+
   // Keep editingAlarm synced with store changes (e.g. if skipNextDate is toggled inside modal)
   const currentEditingAlarm = useMemo(() => {
     if (!editingAlarm) return null;
@@ -111,11 +158,12 @@ export const IntervalAlarmScreen: React.FC = () => {
 
   // Early Dismissal ("I'm Already Awake") candidate: nearest enabled alarm ringing within earlyDismissalWindowMinutes
   const earlyDismissCandidate = useMemo(() => {
-    const windowMs = (earlyDismissalWindowMinutes || 45) * 60 * 1000;
+    const windowMs = (earlyDismissalWindowMinutes || 15) * 60 * 1000;
     let best: { alarm: AlarmItem; minsLeft: number } | null = null;
 
     for (const alarm of alarms) {
       if (!alarm.isEnabled) continue;
+      if (alarm.pausedUntil && alarm.pausedUntil > now.getTime()) continue;
       const nextDate = calculateNextOccurrence(alarm, now);
       const diffMs = nextDate.getTime() - now.getTime();
       if (diffMs > 0 && diffMs <= windowMs) {
@@ -181,13 +229,15 @@ export const IntervalAlarmScreen: React.FC = () => {
     setPowerNapModalVisible(false);
   }, []);
 
-  // Check if selected category has any enabled alarms
+  // Check if selected category has any active (enabled and not 24h-paused) alarms
   const selectedCategoryAlarms = useMemo(() => {
     if (!selectedCategory) return [];
     return alarms.filter((a) => a.category === selectedCategory);
   }, [alarms, selectedCategory]);
 
-  const anyEnabledInSelectedCategory = selectedCategoryAlarms.some((a) => a.isEnabled);
+  const anyEnabledInSelectedCategory = selectedCategoryAlarms.some(
+    (a) => a.isEnabled && !(a.pausedUntil && a.pausedUntil > now.getTime())
+  );
 
   // Status bar inset calculation for Android & iOS
   const topInset = Math.max(insets.top, RNStatusBar.currentHeight ?? 0, 20);
@@ -212,13 +262,10 @@ export const IntervalAlarmScreen: React.FC = () => {
           },
         ]}
       >
-        {/* Native Alarms Header with Live Sleep Window Counter */}
+        {/* Native Alarms Header with Safety Status & Settings Icons */}
         <GreetingHeader onOpenSettings={handleOpenSettings} />
 
-        {/* Pre-Sleep "All Systems Go" Safety Check Banner */}
-        <SafetyCheckBanner />
-
-        {/* Category Filter & 1-Tap Group Toggle Chip Bar */}
+        {/* Category Filter Slider + Under-Slider 24h Category Toggle */}
         {alarms.length > 0 && allCategories.length > 0 && (
           <View style={styles.categoryBarWrapper}>
             <ScrollView
@@ -246,7 +293,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                           : colors.surfaceSubtle,
                     borderColor:
                       selectedCategory === null ? colors.accent : colors.surfaceBorder,
-                    borderRadius: radii.pill,
+                    borderRadius: radii.chip,
                   },
                 ]}
               >
@@ -287,7 +334,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                             ? colors.cardOnBg
                             : colors.surfaceSubtle,
                         borderColor: isSelected ? colors.accent : colors.surfaceBorder,
-                        borderRadius: radii.pill,
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
@@ -312,8 +359,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                   </TouchableOpacity>
                 );
               })}
+            </ScrollView>
 
-              {selectedCategory && selectedCategoryAlarms.length > 0 && (
+            {/* Small "Turn off all alarms for 24 hours" button directly below the category slider */}
+            {selectedCategory && selectedCategoryAlarms.length > 0 && (
+              <View style={[styles.underCategoryRow, { paddingHorizontal: spacing.lg }]}>
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => {
@@ -332,7 +382,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                       borderColor: anyEnabledInSelectedCategory
                         ? 'rgba(245, 158, 11, 0.40)'
                         : colors.accent + '55',
-                      borderRadius: radii.pill,
+                      borderRadius: radii.chip,
                     },
                   ]}
                 >
@@ -354,8 +404,8 @@ export const IntervalAlarmScreen: React.FC = () => {
                       : t.groupToggleActionOn(selectedCategory)}
                   </Text>
                 </TouchableOpacity>
-              )}
-            </ScrollView>
+              </View>
+            )}
           </View>
         )}
 
@@ -390,7 +440,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                   styles.earlyDismissIconCircle,
                   {
                     backgroundColor: colors.accent + '25',
-                    borderRadius: radii.pill,
+                    borderRadius: radii.chip,
                   },
                 ]}
               >
@@ -484,19 +534,31 @@ export const IntervalAlarmScreen: React.FC = () => {
               activeOpacity={0.85}
               onPress={() => {
                 safeHaptics.impactAsync(safeHaptics.ImpactFeedbackStyle.Light);
-                void startPowerNap();
+                if (isPowerNapActive) {
+                  setCancelPowerNapModalVisible(true);
+                } else {
+                  void startPowerNap();
+                }
               }}
               onLongPress={() => {
                 safeHaptics.impactAsync(safeHaptics.ImpactFeedbackStyle.Medium);
-                setPowerNapModalVisible(true);
+                if (isPowerNapActive) {
+                  setCancelPowerNapModalVisible(true);
+                } else {
+                  setPowerNapModalVisible(true);
+                }
               }}
               delayLongPress={320}
               style={[
                 styles.powerNapFab,
                 shadows.buttonPrimary,
                 {
-                  backgroundColor: colors.surfaceHero,
-                  borderColor: colors.primary + '55',
+                  backgroundColor: isPowerNapActive
+                    ? colors.primaryMuted
+                    : colors.surfaceHero,
+                  borderColor: isPowerNapActive
+                    ? colors.primary
+                    : colors.primary + '55',
                   borderRadius: radii.squircleToggle,
                 },
               ]}
@@ -505,19 +567,33 @@ export const IntervalAlarmScreen: React.FC = () => {
               <View
                 style={[
                   styles.powerNapIconCircle,
-                  { backgroundColor: colors.primaryMuted },
+                  {
+                    backgroundColor: isPowerNapActive
+                      ? colors.primary
+                      : colors.primaryMuted,
+                    borderRadius: radii.chip,
+                  },
                 ]}
               >
-                <Zap size={18} color={colors.primary} fill={colors.primary} />
+                <Zap
+                  size={18}
+                  color={isPowerNapActive ? '#FFFFFF' : colors.primary}
+                  fill={isPowerNapActive ? '#FFFFFF' : colors.primary}
+                />
               </View>
               <View style={styles.powerNapTextCol}>
                 <Text
                   style={[
                     styles.powerNapMainText,
-                    { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                    {
+                      color: isPowerNapActive ? colors.primaryLight : colors.textPrimary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
-                  {t.powerNapButtonShort(defaultPowerNapMinutes)}
+                  {isPowerNapActive
+                    ? formattedPowerNapCountdown
+                    : t.powerNapButtonShort(defaultPowerNapMinutes)}
                 </Text>
                 <Text
                   style={[
@@ -525,7 +601,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                     { color: colors.textSecondary, fontFamily: typography.sansRegular },
                   ]}
                 >
-                  {t.powerNapHint}
+                  {isPowerNapActive ? t.powerNapTapToCancel : t.powerNapHint}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -548,32 +624,164 @@ export const IntervalAlarmScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Cancel Power Nap Confirmation Modal */}
+        {cancelPowerNapModalVisible && (
+          <Modal
+            visible={true}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setCancelPowerNapModalVisible(false)}
+          >
+            <View
+              style={[
+                styles.sheetModalBackdrop,
+                { backgroundColor: colors.overlayBackdrop },
+              ]}
+            >
+              <Pressable
+                style={styles.backdropDismissArea}
+                onPress={() => setCancelPowerNapModalVisible(false)}
+              />
+              <Animated.View
+                {...cancelPowerNapGesture.dragHandlePanHandlers}
+                style={[
+                  styles.confirmSheet,
+                  shadows.modal,
+                  {
+                    backgroundColor: colors.modalSurface,
+                    borderColor: colors.surfaceBorder,
+                    borderTopLeftRadius: radii.modalOuter,
+                    borderTopRightRadius: radii.modalOuter,
+                    transform: [{ translateY: cancelPowerNapGesture.translateY }],
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.sheetDragHandle,
+                    {
+                      backgroundColor: colors.surfaceBorder,
+                      borderRadius: radii.handle,
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.confirmTitle,
+                    { color: colors.textPrimary, fontFamily: typography.sansBold },
+                  ]}
+                >
+                  {t.cancelPowerNapTitle}
+                </Text>
+                <Text
+                  style={[
+                    styles.confirmBody,
+                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                  ]}
+                >
+                  {t.cancelPowerNapBody}
+                </Text>
+
+                <View style={styles.confirmBtnRow}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      safeHaptics.selectionAsync();
+                      setCancelPowerNapModalVisible(false);
+                    }}
+                    style={[
+                      styles.confirmBtn,
+                      {
+                        backgroundColor: colors.surfaceSubtle,
+                        borderColor: colors.surfaceBorder,
+                        borderRadius: radii.button,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.confirmBtnText,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.keepNapBtn}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      safeHaptics.notificationAsync(
+                        safeHaptics.NotificationFeedbackType.Warning
+                      );
+                      setCancelPowerNapModalVisible(false);
+                      void cancelPowerNap();
+                    }}
+                    style={[
+                      styles.confirmBtn,
+                      {
+                        backgroundColor: colors.danger,
+                        borderColor: colors.danger,
+                        borderRadius: radii.button,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.confirmBtnText,
+                        { color: '#FFFFFF', fontFamily: typography.sansBold },
+                      ]}
+                    >
+                      {t.cancelNapBtn}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+            </View>
+          </Modal>
+        )}
+
         {/* Bespoke Category Group Toggle Confirmation Modal */}
         {groupToggleConfirm && (
           <Modal
             visible={true}
             transparent
-            animationType="fade"
+            animationType="slide"
             onRequestClose={() => setGroupToggleConfirm(null)}
           >
-            <View style={styles.modalBackdrop}>
-              <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
-              <TouchableOpacity
-                style={StyleSheet.absoluteFill}
-                activeOpacity={1}
+            <View
+              style={[
+                styles.sheetModalBackdrop,
+                { backgroundColor: colors.overlayBackdrop },
+              ]}
+            >
+              <Pressable
+                style={styles.backdropDismissArea}
                 onPress={() => setGroupToggleConfirm(null)}
               />
-              <View
+              <Animated.View
+                {...groupToggleGesture.dragHandlePanHandlers}
                 style={[
-                  styles.confirmCard,
+                  styles.confirmSheet,
                   shadows.modal,
                   {
                     backgroundColor: colors.modalSurface,
                     borderColor: colors.surfaceBorder,
-                    borderRadius: radii.cardOuter,
+                    borderTopLeftRadius: radii.modalOuter,
+                    borderTopRightRadius: radii.modalOuter,
+                    transform: [{ translateY: groupToggleGesture.translateY }],
                   },
                 ]}
               >
+                <View
+                  style={[
+                    styles.sheetDragHandle,
+                    {
+                      backgroundColor: colors.surfaceBorder,
+                      borderRadius: radii.handle,
+                    },
+                  ]}
+                />
                 <Text
                   style={[
                     styles.confirmTitle,
@@ -654,7 +862,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 </View>
-              </View>
+              </Animated.View>
             </View>
           </Modal>
         )}
@@ -732,10 +940,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: 1,
   },
+  underCategoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 2,
+  },
   groupToggleChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
@@ -822,7 +1036,6 @@ const styles = StyleSheet.create({
   powerNapIconCircle: {
     width: 34,
     height: 34,
-    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -844,27 +1057,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalBackdrop: {
+  sheetModalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    justifyContent: 'flex-end',
   },
-  confirmCard: {
+  backdropDismissArea: {
+    flex: 1,
+  },
+  confirmSheet: {
     width: '100%',
-    maxWidth: 360,
-    padding: 22,
-    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 32,
+    borderTopWidth: 1,
+  },
+  sheetDragHandle: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   confirmTitle: {
-    fontSize: 17,
+    fontSize: 18,
     marginBottom: 8,
   },
   confirmBody: {
-    fontSize: 13.5,
-    lineHeight: 19,
-    marginBottom: 20,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 22,
   },
   confirmBtnRow: {
     flexDirection: 'row',
@@ -872,12 +1092,12 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
   confirmBtnText: {
-    fontSize: 13.5,
+    fontSize: 14,
   },
 });

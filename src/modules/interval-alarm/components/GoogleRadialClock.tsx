@@ -17,6 +17,7 @@ interface GoogleRadialClockProps {
   selectedHour: number;     // 0-23
   selectedMinute: number;   // 0-59
   onTimeChange: (hour: number, minute: number) => void;
+  onMinuteSelectionComplete?: () => void;
   resetKey?: string | number;
   isKeyboardMode?: boolean;
   liveDurationParts?: LiveDialDurationParts;
@@ -26,6 +27,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
   selectedHour,
   selectedMinute,
   onTimeChange,
+  onMinuteSelectionComplete,
   resetKey,
   isKeyboardMode = false,
   liveDurationParts,
@@ -73,7 +75,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
       }, 60);
       return () => clearTimeout(timer);
     }
-  }, [isKeyboardMode]);
+  }, [isKeyboardMode, resetKey]);
 
   useEffect(() => {
     setHourInputText(displayHour.toString().padStart(2, '0'));
@@ -110,6 +112,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
   const handleModeChange = (newMode: 'hour' | 'minute') => {
     if (newMode === modeRef.current) return;
+    modeRef.current = newMode;
     Animated.timing(fadeAnim, {
       toValue: 0,
       duration: 120,
@@ -194,6 +197,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     }
 
     onTimeChange(selectedHour, parsed);
+    if (normalized.length === 2) {
+      onMinuteSelectionComplete?.();
+    }
   };
 
   const handleMinuteInputBlur = () => {
@@ -242,6 +248,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
   const handleModeChangeRef = useRef(handleModeChange);
   handleModeChangeRef.current = handleModeChange;
 
+  const onMinuteCompleteRef = useRef(onMinuteSelectionComplete);
+  onMinuteCompleteRef.current = onMinuteSelectionComplete;
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -263,6 +272,8 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
       onPanResponderRelease: () => {
         if (modeRef.current === 'hour') {
           handleModeChangeRef.current('minute');
+        } else if (modeRef.current === 'minute') {
+          onMinuteCompleteRef.current?.();
         }
       },
     })

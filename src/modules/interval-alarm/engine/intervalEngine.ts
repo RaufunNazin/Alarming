@@ -547,6 +547,7 @@ export function getUpcomingAlarmStepDates(
 
     const cycleDateStr = getLocalDateString(cycleBaseDate);
     const upcomingSteps: ScheduledAlarmStep[] = [];
+    let skippedByPause = false;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -555,6 +556,14 @@ export function getUpcomingAlarmStepDates(
       );
 
       if (stepDate.getTime() > nowMs) {
+        if (
+          !ignoreSkipNext &&
+          alarm.pausedUntil &&
+          stepDate.getTime() < alarm.pausedUntil
+        ) {
+          skippedByPause = true;
+          continue;
+        }
         upcomingSteps.push({
           stepIndex: i,
           totalSteps: steps.length,
@@ -569,6 +578,9 @@ export function getUpcomingAlarmStepDates(
 
     if (upcomingSteps.length > 0) {
       return upcomingSteps;
+    }
+    if (skippedByPause && !hasRepeatDays) {
+      return [];
     }
   }
 
@@ -603,6 +615,7 @@ export function findDueAlarmStepAtTime(
   now: Date = new Date()
 ): ScheduledAlarmStep | null {
   if (!alarm.isEnabled) return null;
+  if (alarm.pausedUntil && now.getTime() < alarm.pausedUntil) return null;
 
   const steps = getAlarmSteps(alarm);
   const firstStep = steps[0];

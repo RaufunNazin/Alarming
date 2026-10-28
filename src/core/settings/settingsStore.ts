@@ -52,7 +52,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   showToastBanners: true,
   enableSafetyCheckBanner: true,
   volumeButtonAction: 'snooze',
-  earlyDismissalWindowMinutes: 45,
+  earlyDismissalWindowMinutes: 15,
   categories: DEFAULT_ALARM_CATEGORIES,
 };
 
