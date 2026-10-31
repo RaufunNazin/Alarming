@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 interface AlarmCardItemProps {
   alarm: AlarmItem;
+  nowMinuteKey?: number;
   onPressCard: (alarm: AlarmItem) => void;
   onToggle: (id: string) => void;
   onSwipeDelete?: (id: string) => void;
@@ -47,6 +48,7 @@ const SWIPE_TRIGGER_THRESHOLD = 110;
 
 export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function AlarmCardItem({
   alarm,
+  nowMinuteKey,
   onPressCard,
   onToggle,
   onSwipeDelete,
@@ -57,13 +59,42 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   const { t, language } = useTranslation();
 
   const [showQuickMenu, setShowQuickMenu] = useState(false);
-  const { translateY: quickMenuTranslateY, dragHandlePanHandlers } = useSheetModalGesture(
-    showQuickMenu,
-    () => setShowQuickMenu(false)
-  );
+  const {
+    translateY: quickMenuTranslateY,
+    backdropOpacity: quickMenuBackdropOpacity,
+    dragHandlePanHandlers,
+    sheetPanHandlers,
+    onSheetLayout,
+  } = useSheetModalGesture(showQuickMenu, () => setShowQuickMenu(false));
   const translateX = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(1)).current;
   const hapticFiredRef = useRef(false);
+
+  // Ensure card position and opacity are reset if restored after undo
+  useEffect(() => {
+    translateX.setValue(0);
+    cardOpacity.setValue(1);
+  }, [alarm.id, translateX, cardOpacity]);
+
+  const editHintOpacity = useMemo(
+    () =>
+      translateX.interpolate({
+        inputRange: [0, 24, SWIPE_TRIGGER_THRESHOLD],
+        outputRange: [0, 0.4, 1],
+        extrapolate: 'clamp',
+      }),
+    [translateX]
+  );
+
+  const deleteHintOpacity = useMemo(
+    () =>
+      translateX.interpolate({
+        inputRange: [-SWIPE_TRIGGER_THRESHOLD, -24, 0],
+        outputRange: [1, 0.4, 0],
+        extrapolate: 'clamp',
+      }),
+    [translateX]
+  );
 
   const isPausedFor24h = Boolean(alarm.pausedUntil && alarm.pausedUntil > Date.now());
   const isEffectivelyEnabled = alarm.isEnabled && !isPausedFor24h;
@@ -71,7 +102,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   const scheduleStr = useMemo(
     () => getSmartScheduleString(alarm),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [alarm, language]
+    [alarm, language, nowMinuteKey]
   );
   const timeDisplay = useMemo(
     () => formatAlarmTimeDisplay(alarm),
@@ -217,6 +248,65 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
       }}
     >
       <View style={styles.swipeWrapper}>
+        {/* Visual Swipe Action Background Indicators */}
+        <View
+          pointerEvents="none"
+          style={[
+            styles.swipeActionBackground,
+            {
+              borderRadius: radii.cardOuter,
+            },
+          ]}
+        >
+          <Animated.View
+            style={[
+              styles.swipeActionSide,
+              styles.swipeActionLeft,
+              {
+                backgroundColor: colors.accentSoft,
+                borderColor: colors.accent + '45',
+                borderRadius: radii.cardOuter,
+                opacity: editHintOpacity,
+              },
+            ]}
+          >
+            <Edit3 size={18} color={colors.accent} />
+            <Text
+              style={[
+                styles.swipeActionLabel,
+                { color: colors.accent, fontFamily: typography.sansBold },
+              ]}
+            >
+              {t.swipeEditBtn}
+            </Text>
+          </Animated.View>
+
+          {onSwipeDelete && (
+            <Animated.View
+              style={[
+                styles.swipeActionSide,
+                styles.swipeActionRight,
+                {
+                  backgroundColor: 'rgba(239, 68, 68, 0.14)',
+                  borderColor: 'rgba(239, 68, 68, 0.35)',
+                  borderRadius: radii.cardOuter,
+                  opacity: deleteHintOpacity,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.swipeActionLabel,
+                  { color: colors.danger, fontFamily: typography.sansBold },
+                ]}
+              >
+                {t.swipeDeleteBtn}
+              </Text>
+              <Trash2 size={18} color={colors.danger} />
+            </Animated.View>
+          )}
+        </View>
+
         {/* Foreground Swipeable Card */}
         <Animated.View
           {...panResponder.panHandlers}
@@ -404,20 +494,27 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
         <Modal
           visible={showQuickMenu}
           transparent
-          animationType="slide"
+          animationType="fade"
           onRequestClose={() => setShowQuickMenu(false)}
         >
-          <View
-            style={[
-              styles.modalBackdrop,
-              { backgroundColor: colors.overlayBackdrop },
-            ]}
-          >
+          <View style={styles.modalBackdrop}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  backgroundColor: colors.overlayBackdrop,
+                  opacity: quickMenuBackdropOpacity,
+                },
+              ]}
+            />
             <Pressable
               style={styles.backdropDismissArea}
               onPress={() => setShowQuickMenu(false)}
             />
             <Animated.View
+              onLayout={onSheetLayout}
+              {...sheetPanHandlers}
               style={[
                 styles.quickSheet,
                 shadows.modal,
@@ -597,6 +694,38 @@ const styles = StyleSheet.create({
   swipeWrapper: {
     position: 'relative',
     justifyContent: 'center',
+  },
+  swipeActionBackground: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  swipeActionSide: {
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+  },
+  swipeActionLeft: {
+    justifyContent: 'flex-start',
+    paddingRight: 28,
+  },
+  swipeActionRight: {
+    justifyContent: 'flex-end',
+    paddingLeft: 28,
+    marginLeft: 'auto',
+  },
+  swipeActionLabel: {
+    fontSize: 13,
+    letterSpacing: 0.2,
   },
   cardContainer: {
     borderWidth: 1,

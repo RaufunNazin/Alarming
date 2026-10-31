@@ -150,11 +150,20 @@ export const IntervalAlarmScreen: React.FC = () => {
     return Array.from(set);
   }, [configuredCategories, alarms]);
 
+  // Reset selectedCategory if it was deleted in Settings
+  useEffect(() => {
+    if (selectedCategory && !allCategories.includes(selectedCategory)) {
+      setSelectedCategory(null);
+    }
+  }, [selectedCategory, allCategories]);
+
   // Filtered alarms by category
   const filteredAlarms = useMemo(() => {
     if (!selectedCategory) return alarms;
     return alarms.filter((a) => a.category === selectedCategory);
   }, [alarms, selectedCategory]);
+
+  const nowMinuteKey = Math.floor(now.getTime() / 60000);
 
   // Early Dismissal ("I'm Already Awake") candidate: nearest enabled alarm ringing within earlyDismissalWindowMinutes
   const earlyDismissCandidate = useMemo(() => {
@@ -478,6 +487,7 @@ export const IntervalAlarmScreen: React.FC = () => {
               <AlarmCardItem
                 key={alarm.id}
                 alarm={alarm}
+                nowMinuteKey={nowMinuteKey}
                 onPressCard={handleOpenEditModal}
                 onToggle={handleToggleAlarm}
                 onSwipeDelete={handleSwipeDelete}
@@ -629,21 +639,27 @@ export const IntervalAlarmScreen: React.FC = () => {
           <Modal
             visible={true}
             transparent
-            animationType="slide"
+            animationType="fade"
             onRequestClose={() => setCancelPowerNapModalVisible(false)}
           >
-            <View
-              style={[
-                styles.sheetModalBackdrop,
-                { backgroundColor: colors.overlayBackdrop },
-              ]}
-            >
+            <View style={styles.sheetModalBackdrop}>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    backgroundColor: colors.overlayBackdrop,
+                    opacity: cancelPowerNapGesture.backdropOpacity,
+                  },
+                ]}
+              />
               <Pressable
                 style={styles.backdropDismissArea}
                 onPress={() => setCancelPowerNapModalVisible(false)}
               />
               <Animated.View
-                {...cancelPowerNapGesture.dragHandlePanHandlers}
+                onLayout={cancelPowerNapGesture.onSheetLayout}
+                {...cancelPowerNapGesture.sheetPanHandlers}
                 style={[
                   styles.confirmSheet,
                   shadows.modal,
@@ -657,6 +673,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                 ]}
               >
                 <View
+                  {...cancelPowerNapGesture.dragHandlePanHandlers}
                   style={[
                     styles.sheetDragHandle,
                     {
@@ -746,21 +763,27 @@ export const IntervalAlarmScreen: React.FC = () => {
           <Modal
             visible={true}
             transparent
-            animationType="slide"
+            animationType="fade"
             onRequestClose={() => setGroupToggleConfirm(null)}
           >
-            <View
-              style={[
-                styles.sheetModalBackdrop,
-                { backgroundColor: colors.overlayBackdrop },
-              ]}
-            >
+            <View style={styles.sheetModalBackdrop}>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    backgroundColor: colors.overlayBackdrop,
+                    opacity: groupToggleGesture.backdropOpacity,
+                  },
+                ]}
+              />
               <Pressable
                 style={styles.backdropDismissArea}
                 onPress={() => setGroupToggleConfirm(null)}
               />
               <Animated.View
-                {...groupToggleGesture.dragHandlePanHandlers}
+                onLayout={groupToggleGesture.onSheetLayout}
+                {...groupToggleGesture.sheetPanHandlers}
                 style={[
                   styles.confirmSheet,
                   shadows.modal,
@@ -774,6 +797,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                 ]}
               >
                 <View
+                  {...groupToggleGesture.dragHandlePanHandlers}
                   style={[
                     styles.sheetDragHandle,
                     {

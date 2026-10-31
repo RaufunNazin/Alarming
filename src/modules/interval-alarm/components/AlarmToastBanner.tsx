@@ -89,8 +89,10 @@ export const AlarmToastBanner: React.FC<AlarmToastBannerProps> = ({
     return null;
   }
 
-  // Parse "Alarm set for <time> from now" to highlight <time> only with accent color
-  const match = toastMessage.match(/^(Alarm set for\s+)(.+?)(\s+from now)$/i);
+  // Parse "Alarm set for <time> from now" (or Bangla equivalent) to highlight <time> only with accent color
+  const match =
+    toastMessage.match(/^(Alarm set for\s+)(.+?)(\s+from now)$/i) ||
+    toastMessage.match(/^(অ্যালার্ম সেট হয়েছে • আর\s+)(.+?)(\s+পর বাজবে)$/);
 
   const handleActionPress = () => {
     safeHaptics.selectionAsync();

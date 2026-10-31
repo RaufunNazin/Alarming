@@ -12,7 +12,7 @@ export interface DeviceSafetyStatus {
 
 /**
  * Universal Alarm Sound Engine & Synthesizer
- * 
+ *
  * Provides:
  * 1. Web Audio API synthesizer for clean, melodic morning chimes on Web (0 latency, 0 external assets).
  * 2. Synchronized rhythmic haptic pulses on mobile devices.
@@ -22,6 +22,8 @@ export interface DeviceSafetyStatus {
 class AlarmSoundEngine {
   private audioContext: AudioContext | null = null;
   private loopInterval: ReturnType<typeof setInterval> | null = null;
+  private activeWebOscillators: Set<OscillatorNode> = new Set();
+  private activeWebGains: Set<GainNode> = new Set();
   private isPlaying: boolean = false;
   private isMuted: boolean = false;
 
@@ -30,7 +32,9 @@ class AlarmSoundEngine {
       return null;
     }
     if (!this.audioContext) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.audioContext = new AudioCtx();
       }
@@ -38,20 +42,39 @@ class AlarmSoundEngine {
     return this.audioContext;
   }
 
+  private stopActiveWebNodes(): void {
+    for (const osc of this.activeWebOscillators) {
+      try {
+        osc.stop();
+      } catch {}
+      try {
+        osc.disconnect();
+      } catch {}
+    }
+    this.activeWebOscillators.clear();
+
+    for (const gain of this.activeWebGains) {
+      try {
+        gain.disconnect();
+      } catch {}
+    }
+    this.activeWebGains.clear();
+  }
+
   /**
    * Plays a single gentle chime chord note sequence (C5 - E5 - G5 - C6)
    */
   private playWebChimeChord(ctx: AudioContext, gainFactor: number = 0.3) {
-    if (this.isMuted) return;
+    if (this.isMuted || !this.isPlaying) return;
 
     try {
       const now = ctx.currentTime;
       // Gentle ascending pentatonic bell chime frequencies (Hz)
       const notes = [
-        { freq: 523.25, time: 0.0, duration: 0.6 },  // C5
+        { freq: 523.25, time: 0.0, duration: 0.6 }, // C5
         { freq: 659.25, time: 0.18, duration: 0.6 }, // E5
         { freq: 783.99, time: 0.36, duration: 0.7 }, // G5
-        { freq: 1046.50, time: 0.54, duration: 0.9 }, // C6
+        { freq: 1046.5, time: 0.54, duration: 0.9 }, // C6
       ];
 
       notes.forEach(({ freq, time, duration }) => {
@@ -86,6 +109,28 @@ class AlarmSoundEngine {
         gain.connect(ctx.destination);
         overtoneGain.connect(ctx.destination);
 
+        this.activeWebOscillators.add(osc);
+        this.activeWebOscillators.add(overtone);
+        this.activeWebGains.add(gain);
+        this.activeWebGains.add(overtoneGain);
+
+        osc.onended = () => {
+          this.activeWebOscillators.delete(osc);
+          this.activeWebGains.delete(gain);
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {}
+        };
+        overtone.onended = () => {
+          this.activeWebOscillators.delete(overtone);
+          this.activeWebGains.delete(overtoneGain);
+          try {
+            overtone.disconnect();
+            overtoneGain.disconnect();
+          } catch {}
+        };
+
         osc.start(startTime);
         overtone.start(startTime);
 
@@ -107,7 +152,7 @@ class AlarmSoundEngine {
     // Trigger immediate haptics on native
     this.triggerHapticPulse();
 
-    // 1. Play native Android clock alarm sound (TYPE_ALARM)
+    // 1. Play native Android clock alarm sound (TYPE_ALARM) once; native Ringtone handles looping
     if (Platform.OS === 'android' && !this.isMuted) {
       try {
         AlarmSound?.playAlarmSound?.();
@@ -127,13 +172,8 @@ class AlarmSoundEngine {
 
     // Set up repeating chime/pulse loop
     this.loopInterval = setInterval(() => {
+      if (!this.isPlaying) return;
       this.triggerHapticPulse();
-
-      if (Platform.OS === 'android' && !this.isMuted) {
-        try {
-          AlarmSound?.playAlarmSound?.();
-        } catch {}
-      }
 
       const currentCtx = this.getAudioContext();
       if (currentCtx && !this.isMuted) {
@@ -146,20 +186,21 @@ class AlarmSoundEngine {
   }
 
   /**
-   * Stops the looping alarm sound and releases resources
+   * Stops the looping alarm sound and releases resources immediately
    */
   public stopAlarmSound(): void {
     this.isPlaying = false;
+    if (this.loopInterval) {
+      clearInterval(this.loopInterval);
+      this.loopInterval = null;
+    }
+    this.stopActiveWebNodes();
     if (Platform.OS === 'android') {
       try {
         AlarmSound?.stopAlarmSound?.();
       } catch (e) {
         console.warn('Could not stop native alarm sound:', e);
       }
-    }
-    if (this.loopInterval) {
-      clearInterval(this.loopInterval);
-      this.loopInterval = null;
     }
   }
 
@@ -203,6 +244,22 @@ class AlarmSoundEngine {
         console.warn('Could not open full screen intent settings:', e);
       }
     }
+  }
+
+  /**
+   * Restores the device's alarm audio stream to full volume and shows the system volume slider on Android.
+   */
+  public async raiseAlarmVolumeToSafeLevel(): Promise<number> {
+    this.isMuted = false;
+    if (Platform.OS === 'android' && AlarmSound?.raiseAlarmVolumeToSafeLevel) {
+      try {
+        const res = await AlarmSound.raiseAlarmVolumeToSafeLevel();
+        return typeof res === 'number' ? res : 100;
+      } catch {
+        return 100;
+      }
+    }
+    return 100;
   }
 
   /**

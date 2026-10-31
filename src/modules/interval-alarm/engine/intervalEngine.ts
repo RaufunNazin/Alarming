@@ -1,4 +1,4 @@
-import { AlarmItem } from '../types';
+import { AlarmItem, CustomAlarmStep } from '../types';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { formatNumberLocalized, formatTime12hLocalized } from '../../../core/i18n/translations';
 
@@ -30,7 +30,7 @@ export function getLocalDateString(date: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-function isCycleDismissedForDate(alarm: AlarmItem, cycleBaseDate: Date): boolean {
+export function isCycleDismissedForDate(alarm: AlarmItem, cycleBaseDate: Date): boolean {
   if (!alarm.dismissedForToday || !alarm.lastDismissedDate) {
     return false;
   }
@@ -413,6 +413,32 @@ export function getBaseAlarmSteps(
 }
 
 /**
+ * Sorts custom steps chronologically within a single cycle window without jumping +24h
+ * when a step is nudged past its neighbor. Handles genuine overnight windows (>12h wrap).
+ */
+export function sortCustomStepsChronologically(steps: CustomAlarmStep[]): CustomAlarmStep[] {
+  if (steps.length <= 1) return steps;
+  const anchorMin = steps[0].hour * 60 + steps[0].minute;
+
+  const withOffset = steps.map((step, originalIdx) => {
+    const rawMin = step.hour * 60 + step.minute;
+    let delta = rawMin - anchorMin;
+    // If a step is more than 12 hours earlier than the anchor (e.g. anchor 23:30, step 00:15),
+    // treat it as crossing midnight (+24h); if it's slightly earlier (e.g. nudged -5m before step 0),
+    // keep its negative delta so it sorts to the front instead of wrapping +24h into tomorrow.
+    if (delta < -720) {
+      delta += 1440;
+    } else if (delta > 720) {
+      delta -= 1440;
+    }
+    return { step, delta, originalIdx };
+  });
+
+  withOffset.sort((a, b) => (a.delta !== b.delta ? a.delta - b.delta : a.originalIdx - b.originalIdx));
+  return withOffset.map((item) => item.step);
+}
+
+/**
  * Returns the active sequence of IntervalStep objects for any alarm type ('single' | 'interval' | 'offset'),
  * respecting per-step `customSteps` overrides (individual timing adjustments and on/off states).
  */
@@ -433,7 +459,8 @@ export function getAlarmSteps(
 ): IntervalStep[] {
   if (alarm.customSteps && alarm.customSteps.length > 0) {
     const enabledSteps = alarm.customSteps.filter((s) => s.isEnabled);
-    const sourceSteps = enabledSteps.length > 0 ? enabledSteps : [alarm.customSteps[0]];
+    const rawSource = enabledSteps.length > 0 ? enabledSteps : [alarm.customSteps[0]];
+    const sourceSteps = sortCustomStepsChronologically(rawSource);
     const firstTotal = sourceSteps[0].hour * 60 + sourceSteps[0].minute;
     let prevAbsolute = firstTotal;
 
@@ -447,8 +474,11 @@ export function getAlarmSteps(
         };
       }
       let currentAbsolute = step.hour * 60 + step.minute;
-      while (currentAbsolute < prevAbsolute) {
+      if (currentAbsolute < firstTotal - 720) {
         currentAbsolute += 24 * 60;
+      }
+      if (currentAbsolute < prevAbsolute) {
+        currentAbsolute = prevAbsolute;
       }
       prevAbsolute = currentAbsolute;
       return {
@@ -547,7 +577,6 @@ export function getUpcomingAlarmStepDates(
 
     const cycleDateStr = getLocalDateString(cycleBaseDate);
     const upcomingSteps: ScheduledAlarmStep[] = [];
-    let skippedByPause = false;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -561,7 +590,6 @@ export function getUpcomingAlarmStepDates(
           alarm.pausedUntil &&
           stepDate.getTime() < alarm.pausedUntil
         ) {
-          skippedByPause = true;
           continue;
         }
         upcomingSteps.push({
@@ -579,16 +607,17 @@ export function getUpcomingAlarmStepDates(
     if (upcomingSteps.length > 0) {
       return upcomingSteps;
     }
-    if (skippedByPause && !hasRepeatDays) {
-      return [];
-    }
   }
 
-  // Fallback to tomorrow if all 7 days were somehow skipped
+  // Fallback to tomorrow (or the day after pausedUntil) if all candidate days were skipped
+  const fallbackRef =
+    !ignoreSkipNext && alarm.pausedUntil && alarm.pausedUntil > nowMs
+      ? new Date(alarm.pausedUntil)
+      : now;
   const fallbackBase = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
+    fallbackRef.getFullYear(),
+    fallbackRef.getMonth(),
+    fallbackRef.getDate() + 1,
     firstStep.hour,
     firstStep.minute,
     0,
@@ -768,7 +797,22 @@ export function getSmartScheduleString(alarm: AlarmItem, referenceDate: Date = n
  */
 export function calculateNextOccurrence(alarm: AlarmItem, referenceDate: Date = new Date()): Date {
   const upcomingSteps = getUpcomingAlarmStepDates(alarm, referenceDate);
-  return upcomingSteps[0].date;
+  if (upcomingSteps.length > 0 && upcomingSteps[0]?.date) {
+    return upcomingSteps[0].date;
+  }
+  const unskippedSteps = getUpcomingAlarmStepDates(alarm, referenceDate, true);
+  if (unskippedSteps.length > 0 && unskippedSteps[0]?.date) {
+    return unskippedSteps[0].date;
+  }
+  const fallback = new Date(referenceDate);
+  fallback.setDate(fallback.getDate() + 1);
+  fallback.setHours(
+    Number.isFinite(alarm.startHour) ? alarm.startHour : 7,
+    Number.isFinite(alarm.startMinute) ? alarm.startMinute : 0,
+    0,
+    0
+  );
+  return fallback;
 }
 
 /**
@@ -1077,7 +1121,10 @@ export function findNextUpcomingAlarm(
   alarms: AlarmItem[],
   referenceDate: Date = new Date()
 ): { nextAlarm: AlarmItem; nextDate: Date; countdownText: string } | null {
-  const enabledAlarms = alarms.filter((a) => a.isEnabled);
+  const nowMs = referenceDate.getTime();
+  const enabledAlarms = alarms.filter(
+    (a) => a.isEnabled && !(a.pausedUntil && a.pausedUntil > nowMs)
+  );
   if (enabledAlarms.length === 0) {
     return null;
   }
@@ -1101,35 +1148,46 @@ export function findNextUpcomingAlarm(
 }
 
 /**
- * Formats repeat days into readable summary
+ * Formats repeat days into readable localized summary
  */
 export function formatRepeatDays(repeatDays: number[]): string {
+  const lang = useSettingsStore.getState().language;
+
   if (!repeatDays || repeatDays.length === 0) {
-    return 'One-off';
+    return lang === 'bn' ? 'একবার' : 'One-off';
   }
   if (repeatDays.length === 7) {
-    return 'Every day';
+    return lang === 'bn' ? 'প্রতিদিন' : 'Every day';
   }
   if (
     repeatDays.length === 5 &&
     [1, 2, 3, 4, 5].every((d) => repeatDays.includes(d))
   ) {
-    return 'Weekdays (Mon–Fri)';
+    return lang === 'bn' ? 'সোম–শুক্র' : 'Weekdays (Mon–Fri)';
   }
   if (
     repeatDays.length === 5 &&
     [0, 1, 2, 3, 4].every((d) => repeatDays.includes(d))
   ) {
-    return 'Sun–Thu';
+    return lang === 'bn' ? 'রবি–বৃহঃ' : 'Sun–Thu';
   }
   if (
     repeatDays.length === 2 &&
     [0, 6].every((d) => repeatDays.includes(d))
   ) {
-    return 'Weekends (Sat–Sun)';
+    return lang === 'bn' ? 'ছুটির দিন (শনি–রবি)' : 'Weekends (Sat–Sun)';
+  }
+  if (
+    repeatDays.length === 2 &&
+    [5, 6].every((d) => repeatDays.includes(d))
+  ) {
+    return lang === 'bn' ? 'শুক্র–শনি' : 'Fri–Sat';
   }
 
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNames =
+    lang === 'bn'
+      ? ['রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহঃ', 'শুক্র', 'শনি']
+      : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return repeatDays
     .slice()
     .sort((a, b) => a - b)

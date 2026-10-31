@@ -48,14 +48,16 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
 
   const [mode, setMode] = useState<'hour' | 'minute'>('hour');
   const [hourInputText, setHourInputText] = useState(() =>
-    displayHour.toString().padStart(2, '0')
+    formatNum(displayHour.toString().padStart(2, '0'))
   );
   const [minuteInputText, setMinuteInputText] = useState(() =>
-    selectedMinute.toString().padStart(2, '0')
+    formatNum(selectedMinute.toString().padStart(2, '0'))
   );
 
   const hourInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const minuteInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const isHourFocusedRef = useRef(false);
+  const isMinuteFocusedRef = useRef(false);
 
   const [prevResetKey, setPrevResetKey] = useState(resetKey);
   if (resetKey !== prevResetKey) {
@@ -63,8 +65,8 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     if (mode !== 'hour') {
       setMode('hour');
     }
-    setHourInputText(displayHour.toString().padStart(2, '0'));
-    setMinuteInputText(selectedMinute.toString().padStart(2, '0'));
+    setHourInputText(formatNum(displayHour.toString().padStart(2, '0')));
+    setMinuteInputText(formatNum(selectedMinute.toString().padStart(2, '0')));
   }
 
   useEffect(() => {
@@ -78,12 +80,16 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
   }, [isKeyboardMode, resetKey]);
 
   useEffect(() => {
-    setHourInputText(displayHour.toString().padStart(2, '0'));
-  }, [displayHour]);
+    if (!isHourFocusedRef.current) {
+      setHourInputText(formatNum(displayHour.toString().padStart(2, '0')));
+    }
+  }, [displayHour, formatNum]);
 
   useEffect(() => {
-    setMinuteInputText(selectedMinute.toString().padStart(2, '0'));
-  }, [selectedMinute]);
+    if (!isMinuteFocusedRef.current) {
+      setMinuteInputText(formatNum(selectedMinute.toString().padStart(2, '0')));
+    }
+  }, [selectedMinute, formatNum]);
 
   const isAM = selectedHour < 12;
 
@@ -146,19 +152,31 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     const normalized = text
       .replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)))
       .replace(/[^0-9]/g, '');
-    setHourInputText(normalized);
 
-    if (normalized.length === 0) return;
+    if (normalized.length === 0) {
+      setHourInputText('');
+      return;
+    }
+
     let parsed = parseInt(normalized, 10);
     if (isNaN(parsed)) return;
 
+    // Allow a single leading '0' while waiting for the second digit (e.g. '07')
+    if (normalized === '0') {
+      setHourInputText(formatNum('0'));
+      return;
+    }
+
+    let displayNormalized = normalized;
     if (parsed > 12) {
       parsed = 12;
-      setHourInputText('12');
-    } else if (parsed === 0 && normalized.length === 2) {
+      displayNormalized = '12';
+    } else if (parsed === 0 && normalized.length >= 2) {
       parsed = 12;
-      setHourInputText('12');
+      displayNormalized = '12';
     }
+
+    setHourInputText(formatNum(displayNormalized));
 
     if (parsed >= 1 && parsed <= 12) {
       const newHour24 = isAM
@@ -171,39 +189,51 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
       onTimeChange(newHour24, selectedMinute);
 
       // Auto-advance to minute box once 2 digits or a single digit >= 2 is entered
-      if (normalized.length === 2 || parsed >= 2) {
+      if (displayNormalized.length === 2 || parsed >= 2) {
+        isHourFocusedRef.current = false;
+        setHourInputText(formatNum(parsed.toString().padStart(2, '0')));
         minuteInputRef.current?.focus();
       }
     }
   };
 
   const handleHourInputBlur = () => {
-    setHourInputText(displayHour.toString().padStart(2, '0'));
+    isHourFocusedRef.current = false;
+    setHourInputText(formatNum(displayHour.toString().padStart(2, '0')));
   };
 
   const handleMinuteInputChange = (text: string) => {
     const normalized = text
       .replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)))
       .replace(/[^0-9]/g, '');
-    setMinuteInputText(normalized);
 
-    if (normalized.length === 0) return;
+    if (normalized.length === 0) {
+      setMinuteInputText('');
+      return;
+    }
+
     let parsed = parseInt(normalized, 10);
     if (isNaN(parsed)) return;
 
+    let displayNormalized = normalized;
     if (parsed > 59) {
       parsed = 59;
-      setMinuteInputText('59');
+      displayNormalized = '59';
     }
 
+    setMinuteInputText(formatNum(displayNormalized));
     onTimeChange(selectedHour, parsed);
-    if (normalized.length === 2) {
-      onMinuteSelectionComplete?.();
+
+    if (displayNormalized.length === 2 || parsed >= 6) {
+      if (displayNormalized.length === 2) {
+        onMinuteSelectionComplete?.();
+      }
     }
   };
 
   const handleMinuteInputBlur = () => {
-    setMinuteInputText(selectedMinute.toString().padStart(2, '0'));
+    isMinuteFocusedRef.current = false;
+    setMinuteInputText(formatNum(selectedMinute.toString().padStart(2, '0')));
   };
 
   // Angle for hand in degrees
@@ -375,7 +405,10 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
                 ref={hourInputRef}
                 value={hourInputText}
                 onChangeText={handleHourInputChange}
-                onFocus={() => setMode('hour')}
+                onFocus={() => {
+                  isHourFocusedRef.current = true;
+                  setMode('hour');
+                }}
                 onBlur={handleHourInputBlur}
                 keyboardType="number-pad"
                 maxLength={2}
@@ -440,7 +473,10 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
                 ref={minuteInputRef}
                 value={minuteInputText}
                 onChangeText={handleMinuteInputChange}
-                onFocus={() => setMode('minute')}
+                onFocus={() => {
+                  isMinuteFocusedRef.current = true;
+                  setMode('minute');
+                }}
                 onBlur={handleMinuteInputBlur}
                 keyboardType="number-pad"
                 maxLength={2}
@@ -599,7 +635,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               { color: colors.textSecondary, fontFamily: typography.sansMedium },
             ]}
           >
-            {t.hourLabel} (1–12)
+            {t.hourLabel} ({formatNum(1)}–{formatNum(12)})
           </Text>
           <Text
             style={[
@@ -607,7 +643,7 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               { color: colors.textSecondary, fontFamily: typography.sansMedium },
             ]}
           >
-            {t.minuteLabel} (00–59)
+            {t.minuteLabel} ({formatNum('00')}–{formatNum(59)})
           </Text>
         </View>
       ) : (

@@ -28,6 +28,12 @@ interface ClockEditModalProps {
   initialEndHour: number;
   initialEndMinute: number;
   initialOffsetDirection?: 'before' | 'after';
+  hideModeSwitcher?: boolean;
+  alarmCount?: number;
+  intervalMinutes?: number;
+  isEscalating?: boolean;
+  repeatDays?: number[];
+  renderInline?: boolean;
   onClose: () => void;
   onConfirm: (result: {
     type: AlarmType;
@@ -47,6 +53,12 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   initialEndHour,
   initialEndMinute,
   initialOffsetDirection = 'before',
+  hideModeSwitcher = false,
+  alarmCount,
+  intervalMinutes,
+  isEscalating,
+  repeatDays,
+  renderInline = false,
   onClose,
   onConfirm,
 }) => {
@@ -54,10 +66,14 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   const { t, formatTime12h: formatTime12hLocal } = useTranslation();
   const enableKeyboardTimeInput = useSettingsStore((s) => s.enableKeyboardTimeInput);
 
-  const { translateY, keyboardHeight, dragHandlePanHandlers } = useSheetModalGesture(
-    visible,
-    onClose
-  );
+  const {
+    translateY,
+    backdropOpacity,
+    keyboardHeight,
+    onSheetLayout,
+    dragHandlePanHandlers,
+    sheetPanHandlers,
+  } = useSheetModalGesture(visible, onClose);
 
   const alarmTabs: { key: AlarmType; label: string }[] = [
     { key: 'single', label: t.modeSingle },
@@ -143,6 +159,10 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
       endHour,
       endMinute,
       offsetDirection,
+      alarmCount,
+      intervalMinutes,
+      isEscalating,
+      repeatDays,
     });
   }, [
     visible,
@@ -152,67 +172,83 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
     endHour,
     endMinute,
     offsetDirection,
+    alarmCount,
+    intervalMinutes,
+    isEscalating,
+    repeatDays,
   ]);
 
   if (!visible) return null;
 
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View
+  const content = (
+    <View
+      style={[
+        renderInline ? StyleSheet.absoluteFill : null,
+        styles.modalOverlay,
+        {
+          paddingBottom: keyboardHeight,
+        },
+      ]}
+    >
+      <Animated.View
+        pointerEvents="none"
         style={[
-          styles.modalOverlay,
+          StyleSheet.absoluteFill,
           {
             backgroundColor: colors.overlayBackdrop,
-            paddingBottom: keyboardHeight,
+            opacity: backdropOpacity,
+          },
+        ]}
+      />
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => {
+          Keyboard.dismiss();
+          onClose();
+        }}
+        accessibilityLabel="Close clock editor"
+      />
+
+      <Animated.View
+        onLayout={onSheetLayout}
+        {...sheetPanHandlers}
+        style={[
+          styles.modalContent,
+          shadows.modal,
+          {
+            backgroundColor: colors.background,
+            borderColor: colors.surfaceBorder,
+            borderTopLeftRadius: radii.modalOuter,
+            borderTopRightRadius: radii.modalOuter,
+            transform: [{ translateY }],
           },
         ]}
       >
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={() => {
-            Keyboard.dismiss();
-            onClose();
-          }}
-          accessibilityLabel="Close clock editor"
-        />
+        {/* Drag Handle Zone */}
+        <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
+          <View
+            style={[
+              styles.handleBar,
+              {
+                borderRadius: radii.handle,
+                backgroundColor:
+                  themeMode === 'dark'
+                    ? 'rgba(255, 255, 255, 0.22)'
+                    : colors.surfaceBorder,
+              },
+            ]}
+          />
+        </View>
 
-        <Animated.View
-          style={[
-            styles.modalContent,
-            shadows.modal,
-            {
-              backgroundColor: colors.background,
-              borderColor: colors.surfaceBorder,
-              borderTopLeftRadius: radii.modalOuter,
-              borderTopRightRadius: radii.modalOuter,
-              transform: [{ translateY }],
-            },
-          ]}
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          contentContainerStyle={styles.scrollContent}
         >
-          {/* Drag Handle Zone */}
-          <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
-            <View
-              style={[
-                styles.handleBar,
-                {
-                  borderRadius: radii.handle,
-                  backgroundColor:
-                    themeMode === 'dark'
-                      ? 'rgba(255, 255, 255, 0.22)'
-                      : colors.surfaceBorder,
-                },
-              ]}
-            />
-          </View>
-
-          <ScrollView
-            style={styles.scrollView}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            contentContainerStyle={styles.scrollContent}
-          >
-            {/* Alarm Type Switcher */}
+          {/* Alarm Type Switcher (Hidden when editing an individual sequence step) */}
+          {!hideModeSwitcher && (
             <View
               style={[
                 styles.segmentedType,
@@ -257,245 +293,255 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                 );
               })}
             </View>
+          )}
 
-            {/* Google Radial Clock Dial */}
-            <GoogleRadialClock
-              selectedHour={currentDialHour}
-              selectedMinute={currentDialMinute}
-              onTimeChange={handleTimeChange}
-              onMinuteSelectionComplete={handleMinuteSelectionComplete}
-              resetKey={dialResetKey}
-              isKeyboardMode={isKeyboardMode}
-              liveDurationParts={liveRingParts}
-            />
+          {/* Google Radial Clock Dial */}
+          <GoogleRadialClock
+            selectedHour={currentDialHour}
+            selectedMinute={currentDialMinute}
+            onTimeChange={handleTimeChange}
+            onMinuteSelectionComplete={handleMinuteSelectionComplete}
+            resetKey={dialResetKey}
+            isKeyboardMode={isKeyboardMode}
+            liveDurationParts={liveRingParts}
+          />
 
-            {/* Mode-Specific Controls Below Clock */}
-            {alarmType === 'interval' && (
-              <View style={styles.intervalTimesContainer}>
-                <View style={styles.intervalCardRow}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => handleSelectTimeTab('start')}
-                    style={[
-                      styles.timeSelectorCard,
-                      {
-                        backgroundColor:
-                          activeTimeTab === 'start' ? colors.surfaceSubtle : colors.surface,
-                        borderColor:
-                          activeTimeTab === 'start' ? colors.primary : colors.surfaceBorder,
-                        borderRadius: radii.cardInner,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.timeCardLabel,
-                        { color: colors.textSecondary, fontFamily: typography.numbersBold },
-                      ]}
-                    >
-                      {t.startTime.toUpperCase()}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timeCardValue,
-                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                      ]}
-                    >
-                      {formatTime12hLocal(startHour, startMinute).full}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => handleSelectTimeTab('end')}
-                    style={[
-                      styles.timeSelectorCard,
-                      {
-                        backgroundColor:
-                          activeTimeTab === 'end' ? colors.surfaceSubtle : colors.surface,
-                        borderColor:
-                          activeTimeTab === 'end' ? colors.primary : colors.surfaceBorder,
-                        borderRadius: radii.cardInner,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.timeCardLabel,
-                        { color: colors.textSecondary, fontFamily: typography.numbersBold },
-                      ]}
-                    >
-                      {t.endTime.toUpperCase()}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timeCardValue,
-                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                      ]}
-                    >
-                      {formatTime12hLocal(endHour, endMinute).full}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {alarmType === 'offset' && (
-              <View style={styles.offsetOptionsContainer}>
-                <View
+          {/* Mode-Specific Controls Below Clock */}
+          {alarmType === 'interval' && (
+            <View style={styles.intervalTimesContainer}>
+              <View style={styles.intervalCardRow}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectTimeTab('start')}
                   style={[
-                    styles.offsetDirectionRow,
+                    styles.timeSelectorCard,
                     {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.surfaceBorder,
-                      borderRadius: radii.chip,
+                      backgroundColor:
+                        activeTimeTab === 'start' ? colors.surfaceSubtle : colors.surface,
+                      borderColor:
+                        activeTimeTab === 'start' ? colors.primary : colors.surfaceBorder,
+                      borderRadius: radii.cardInner,
                     },
                   ]}
                 >
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => setOffsetDirection('before')}
+                  <Text
                     style={[
-                      styles.directionTab,
-                      offsetDirection === 'before' && {
-                        backgroundColor: colors.surfaceSubtle,
-                        borderRadius: radii.chipInner,
-                      },
+                      styles.timeCardLabel,
+                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.directionTabText,
-                        {
-                          color:
-                            offsetDirection === 'before'
-                              ? colors.textPrimary
-                              : colors.textMuted,
-                          fontFamily: typography.numbersBold,
-                        },
-                      ]}
-                    >
-                      {t.before}
-                    </Text>
-                  </TouchableOpacity>
+                    {t.startTime.toUpperCase()}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.timeCardValue,
+                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {formatTime12hLocal(startHour, startMinute).full}
+                  </Text>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => setOffsetDirection('after')}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectTimeTab('end')}
+                  style={[
+                    styles.timeSelectorCard,
+                    {
+                      backgroundColor:
+                        activeTimeTab === 'end' ? colors.surfaceSubtle : colors.surface,
+                      borderColor:
+                        activeTimeTab === 'end' ? colors.primary : colors.surfaceBorder,
+                      borderRadius: radii.cardInner,
+                    },
+                  ]}
+                >
+                  <Text
                     style={[
-                      styles.directionTab,
-                      offsetDirection === 'after' && {
-                        backgroundColor: colors.surfaceSubtle,
-                        borderRadius: radii.chipInner,
-                      },
+                      styles.timeCardLabel,
+                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.directionTabText,
-                        {
-                          color:
-                            offsetDirection === 'after'
-                              ? colors.textPrimary
-                              : colors.textMuted,
-                          fontFamily: typography.numbersBold,
-                        },
-                      ]}
-                    >
-                      {t.after}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                    {t.endTime.toUpperCase()}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.timeCardValue,
+                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {formatTime12hLocal(endHour, endMinute).full}
+                  </Text>
+                </TouchableOpacity>
               </View>
-            )}
-          </ScrollView>
+            </View>
+          )}
 
-          {/* Bottom Action Bar */}
-          <View
-            style={[
-              styles.bottomActionBar,
-              {
-                borderTopColor: colors.surfaceBorder,
-                backgroundColor: colors.background,
-              },
-            ]}
-          >
-            {enableKeyboardTimeInput && (
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => {
-                  safeHaptics.selectionAsync();
-                  setIsKeyboardMode((v) => {
-                    if (v) Keyboard.dismiss();
-                    return !v;
-                  });
-                }}
-                accessibilityLabel={isKeyboardMode ? t.useDialTooltip : t.useKeyboardTooltip}
+          {alarmType === 'offset' && (
+            <View style={styles.offsetOptionsContainer}>
+              <View
                 style={[
-                  styles.bottomKeypadBtn,
+                  styles.offsetDirectionRow,
                   {
-                    backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
-                    borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
-                    borderRadius: radii.button,
+                    backgroundColor: colors.surface,
+                    borderColor: colors.surfaceBorder,
+                    borderRadius: radii.chip,
                   },
                 ]}
               >
-                {isKeyboardMode ? (
-                  <Clock size={20} color={colors.primary} />
-                ) : (
-                  <KeyboardIcon size={20} color={colors.textSecondary} />
-                )}
-              </TouchableOpacity>
-            )}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setOffsetDirection('before')}
+                  style={[
+                    styles.directionTab,
+                    offsetDirection === 'before' && {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderRadius: radii.chipInner,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.directionTabText,
+                      {
+                        color:
+                          offsetDirection === 'before'
+                            ? colors.textPrimary
+                            : colors.textMuted,
+                        fontFamily: typography.numbersBold,
+                      },
+                    ]}
+                  >
+                    {t.before}
+                  </Text>
+                </TouchableOpacity>
 
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setOffsetDirection('after')}
+                  style={[
+                    styles.directionTab,
+                    offsetDirection === 'after' && {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderRadius: radii.chipInner,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.directionTabText,
+                      {
+                        color:
+                          offsetDirection === 'after'
+                            ? colors.textPrimary
+                            : colors.textMuted,
+                        fontFamily: typography.numbersBold,
+                      },
+                    ]}
+                  >
+                    {t.after}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Bottom Action Bar */}
+        <View
+          style={[
+            styles.bottomActionBar,
+            {
+              borderTopColor: colors.surfaceBorder,
+              backgroundColor: colors.background,
+            },
+          ]}
+        >
+          {enableKeyboardTimeInput && (
             <TouchableOpacity
-              activeOpacity={0.7}
+              activeOpacity={0.8}
               onPress={() => {
-                Keyboard.dismiss();
-                onClose();
+                safeHaptics.selectionAsync();
+                setIsKeyboardMode((v) => {
+                  if (v) Keyboard.dismiss();
+                  return !v;
+                });
               }}
+              accessibilityLabel={isKeyboardMode ? t.useDialTooltip : t.useKeyboardTooltip}
               style={[
-                styles.bottomCancelBtn,
+                styles.bottomKeypadBtn,
                 {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.surfaceBorder,
+                  backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
+                  borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
                   borderRadius: radii.button,
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.bottomCancelBtnText,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
-                ]}
-              >
-                {t.cancel}
-              </Text>
+              {isKeyboardMode ? (
+                <Clock size={20} color={colors.primary} />
+              ) : (
+                <KeyboardIcon size={20} color={colors.textSecondary} />
+              )}
             </TouchableOpacity>
+          )}
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={handleSave}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              Keyboard.dismiss();
+              onClose();
+            }}
+            style={[
+              styles.bottomCancelBtn,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.surfaceBorder,
+                borderRadius: radii.button,
+              },
+            ]}
+          >
+            <Text
               style={[
-                styles.bottomSaveBtn,
-                {
-                  backgroundColor: colors.textPrimary,
-                  borderRadius: radii.button,
-                },
+                styles.bottomCancelBtnText,
+                { color: colors.textSecondary, fontFamily: typography.numbersBold },
               ]}
             >
-              <Text
-                style={[
-                  styles.bottomSaveBtnText,
-                  { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
-                ]}
-              >
-                {t.selectTime}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </View>
+              {t.cancel}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={handleSave}
+            style={[
+              styles.bottomSaveBtn,
+              {
+                backgroundColor: colors.textPrimary,
+                borderRadius: radii.button,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.bottomSaveBtnText,
+                { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
+              ]}
+            >
+              {t.selectTime}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
+  );
+
+  if (renderInline) {
+    return content;
+  }
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 };

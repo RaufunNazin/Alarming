@@ -32,9 +32,11 @@ import {
 import { useTheme } from '../../../core/theme';
 import {
   useSettingsStore,
+  DEFAULT_ALARM_CATEGORIES,
   IntervalModeType,
   VolumeButtonAction,
 } from '../../../core/settings/settingsStore';
+import { useAlarmStore } from '../store/alarmStore';
 import { useTranslation } from '../../../core/i18n/translations';
 import { useSheetModalGesture } from './useSheetModalGesture';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
@@ -55,6 +57,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
   const settings = useSettingsStore();
   const { updateSettings, addCategory, removeCategory, resetSettings } = settings;
+  const clearCategoryFromAlarms = useAlarmStore((s) => s.clearCategoryFromAlarms);
+  const retainOnlyCategoriesOnAlarms = useAlarmStore((s) => s.retainOnlyCategoriesOnAlarms);
+  const showToast = useAlarmStore((s) => s.showToast);
 
   const isLight = themeMode === 'light';
   const sheetBg = isLight ? colors.background : colors.surface;
@@ -62,6 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
   const controlBg = isLight ? colors.surfaceSubtle : colors.surface;
 
   const [alarmTypeModalVisible, setAlarmTypeModalVisible] = useState(false);
+  const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [activeTooltipKey, setActiveTooltipKey] = useState<string | null>(null);
 
@@ -71,13 +77,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
   const {
     translateY: sheetTranslateY,
+    backdropOpacity,
     keyboardHeight,
+    onSheetLayout,
     dragHandlePanHandlers,
+    sheetPanHandlers,
   } = useSheetModalGesture(visible, onClose);
 
   const alarmTypeSheetGesture = useSheetModalGesture(
     alarmTypeModalVisible,
     () => setAlarmTypeModalVisible(false)
+  );
+
+  const resetConfirmSheetGesture = useSheetModalGesture(
+    resetConfirmVisible,
+    () => setResetConfirmVisible(false)
   );
 
   const clearTooltipTimer = useCallback(() => {
@@ -249,18 +263,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
-      onRequestClose={onClose}
+      animationType="fade"
+      onRequestClose={() => {
+        if (resetConfirmVisible) {
+          setResetConfirmVisible(false);
+        } else if (alarmTypeModalVisible) {
+          setAlarmTypeModalVisible(false);
+        } else {
+          onClose();
+        }
+      }}
     >
       <View
         style={[
           styles.backdrop,
           {
-            backgroundColor: colors.overlayBackdrop,
             paddingBottom: keyboardHeight,
           },
         ]}
       >
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: colors.overlayBackdrop,
+              opacity: backdropOpacity,
+            },
+          ]}
+        />
         <Pressable
           style={styles.backdropDismissArea}
           onPress={() => {
@@ -272,6 +303,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
         />
 
         <Animated.View
+          onLayout={onSheetLayout}
+          {...sheetPanHandlers}
           onTouchEnd={() => {
             if (activeTooltipKey && !justPressedHelpRef.current) {
               dismissTooltip();
@@ -742,6 +775,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                       onPress={() => {
                         safeHaptics.selectionAsync();
                         void removeCategory(cat);
+                        void clearCategoryFromAlarms(cat);
                       }}
                       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                     >
@@ -758,6 +792,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                   placeholder={t.addCategoryPlaceholder}
                   placeholderTextColor={colors.textMuted}
                   onSubmitEditing={handleAddCategory}
+                  maxLength={28}
                   style={[
                     styles.addCategoryInput,
                     {
@@ -1408,6 +1443,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
               <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
 
+              {/* Enable Keypad Time Input (No Icon) */}
+              <View style={styles.columnItem}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.rowLabelNoIcon}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      ]}
+                    >
+                      {t.toggleKeypadInputTitle}
+                    </Text>
+                    {renderHelpIcon('toggleKeypadInput')}
+                  </View>
+                  {renderSquircleToggle(settings.enableKeyboardTimeInput, (val) =>
+                    void updateSettings({ enableKeyboardTimeInput: val })
+                  )}
+                </View>
+                {renderTooltipBox('toggleKeypadInput', t.tooltipKeypadInput)}
+              </View>
+
+              <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
+
               {/* Show Power Nap Button (No Icon) */}
               <View style={styles.columnItem}>
                 <View style={styles.rowBetween}>
@@ -1457,10 +1515,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => {
-                safeHaptics.notificationAsync(
-                  safeHaptics.NotificationFeedbackType.Warning
-                );
-                void resetSettings();
+                safeHaptics.impactAsync(safeHaptics.ImpactFeedbackStyle.Light);
+                setResetConfirmVisible(true);
               }}
               style={[
                 styles.resetBtn,
@@ -1512,19 +1568,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
         </Animated.View>
       </View>
 
-      {/* Dedicated Modal for Interval Alarm Type Selection */}
-      <Modal
-        visible={alarmTypeModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setAlarmTypeModalVisible(false)}
-      >
-        <View style={[styles.subModalBackdrop, { backgroundColor: colors.overlayBackdrop }]}>
+      {/* In-Modal Overlay for Interval Alarm Type Selection */}
+      {alarmTypeModalVisible && (
+        <View style={[StyleSheet.absoluteFill, styles.subModalBackdrop]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.overlayBackdrop,
+                opacity: alarmTypeSheetGesture.backdropOpacity,
+              },
+            ]}
+          />
           <Pressable
             style={styles.backdropDismissArea}
             onPress={() => setAlarmTypeModalVisible(false)}
           />
           <Animated.View
+            onLayout={alarmTypeSheetGesture.onSheetLayout}
+            {...alarmTypeSheetGesture.sheetPanHandlers}
             style={[
               styles.subModalCard,
               shadows.modal,
@@ -1690,7 +1753,127 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             </TouchableOpacity>
           </Animated.View>
         </View>
-      </Modal>
+      )}
+
+      {/* In-Modal Overlay for Reset Default Settings Confirmation */}
+      {resetConfirmVisible && (
+        <View style={[StyleSheet.absoluteFill, styles.subModalBackdrop]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.overlayBackdrop,
+                opacity: resetConfirmSheetGesture.backdropOpacity,
+              },
+            ]}
+          />
+          <Pressable
+            style={styles.backdropDismissArea}
+            onPress={() => setResetConfirmVisible(false)}
+          />
+          <Animated.View
+            onLayout={resetConfirmSheetGesture.onSheetLayout}
+            {...resetConfirmSheetGesture.sheetPanHandlers}
+            style={[
+              styles.subModalCard,
+              shadows.modal,
+              {
+                backgroundColor: isLight ? colors.cardOnBg : colors.surface,
+                borderColor: colors.surfaceBorder,
+                borderTopLeftRadius: radii.modalOuter,
+                borderTopRightRadius: radii.modalOuter,
+                transform: [{ translateY: resetConfirmSheetGesture.translateY }],
+              },
+            ]}
+          >
+            <View {...resetConfirmSheetGesture.dragHandlePanHandlers} style={styles.dragHandleArea}>
+              <View
+                style={[
+                  styles.dragHandleBar,
+                  {
+                    backgroundColor: colors.surfaceBorder,
+                    borderRadius: radii.handle,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.subModalTitle,
+                  { color: colors.textPrimary, fontFamily: typography.sansBold },
+                ]}
+              >
+                {t.resetSettingsConfirmTitle}
+              </Text>
+              <Text
+                style={[
+                  styles.subModalDesc,
+                  { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                ]}
+              >
+                {t.resetSettingsConfirmBody}
+              </Text>
+            </View>
+
+            <View style={styles.confirmActionRow}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => {
+                  safeHaptics.selectionAsync();
+                  setResetConfirmVisible(false);
+                }}
+                style={[
+                  styles.confirmActionBtn,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.surfaceBorder,
+                    borderRadius: radii.button,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.confirmActionText,
+                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                  ]}
+                >
+                  {t.cancel}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  safeHaptics.notificationAsync(
+                    safeHaptics.NotificationFeedbackType.Warning
+                  );
+                  setResetConfirmVisible(false);
+                  void resetSettings();
+                  void retainOnlyCategoriesOnAlarms(DEFAULT_ALARM_CATEGORIES);
+                  showToast(t.resetSettingsToast);
+                }}
+                style={[
+                  styles.confirmActionBtn,
+                  {
+                    backgroundColor: colors.danger,
+                    borderColor: colors.danger,
+                    borderRadius: radii.button,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.confirmActionText,
+                    { color: '#FFFFFF', fontFamily: typography.sansBold },
+                  ]}
+                >
+                  {t.resetSettingsBtn}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </View>
+      )}
     </Modal>
   );
 };
@@ -1985,5 +2168,20 @@ const styles = StyleSheet.create({
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  confirmActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 6,
+  },
+  confirmActionBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmActionText: {
+    fontSize: 14,
   },
 });

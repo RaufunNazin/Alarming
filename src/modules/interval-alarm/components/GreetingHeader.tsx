@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, AppState, Linking } from 'react-native';
-import { Settings, Flame, ShieldCheck, X } from 'lucide-react-native';
+import { Settings, Flame, ShieldCheck, AlertTriangle, X } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { useTranslation } from '../../../core/i18n/translations';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
@@ -16,11 +16,14 @@ interface GreetingHeaderProps {
   onOpenSettings?: () => void;
 }
 
+const SAFE_ALARM_VOLUME_THRESHOLD = 80;
+const LOW_BATTERY_WARNING_THRESHOLD = 20;
+
 export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function GreetingHeader({
   onOpenSettings,
 }) {
   const { colors, typography, spacing, radii } = useTheme();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
   const enableSafetyCheckBanner = useSettingsStore((s) => s.enableSafetyCheckBanner);
 
@@ -58,9 +61,12 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
     if (!enableSafetyCheckBanner) return;
 
     void refreshSafetyChecks();
+    // Poll every 2.5s while active so volume slider changes in the OS overlay are reflected quickly
     const interval = setInterval(() => {
-      void refreshSafetyChecks();
-    }, 20000);
+      if (AppState.currentState === 'active') {
+        void refreshSafetyChecks();
+      }
+    }, 2500);
 
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
@@ -83,41 +89,115 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
   }, []);
 
   const isPermissionsReady = notifGranted && safetyStatus.canUseFullScreenIntent;
+  const isVolumeMuted = safetyStatus.alarmVolumePercent <= 0;
+  const isVolumeReduced = safetyStatus.alarmVolumePercent < SAFE_ALARM_VOLUME_THRESHOLD;
+  const isBatteryLow =
+    !safetyStatus.isCharging && safetyStatus.batteryLevel <= LOW_BATTERY_WARNING_THRESHOLD;
 
-  const handleSafetyBadgePress = async () => {
-    safeHaptics.selectionAsync();
-    if (isPermissionsReady) {
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-      }
+  const badgeStatus: 'healthy' | 'warning' | 'danger' =
+    !isPermissionsReady || isVolumeMuted
+      ? 'danger'
+      : isVolumeReduced || isBatteryLow
+        ? 'warning'
+        : 'healthy';
+
+  const showTimedToast = (
+    message: string,
+    actionLabel: string | null = null,
+    onAction: (() => void) | null = null,
+    durationMs: number = 3800
+  ) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    useAlarmStore.setState({
+      toastMessage: message,
+      toastActionLabel: actionLabel,
+      onToastAction: onAction,
+    });
+    toastTimerRef.current = setTimeout(() => {
       useAlarmStore.setState({
-        toastMessage: t.safetyAllSystemsGo,
+        toastMessage: null,
         toastActionLabel: null,
         onToastAction: null,
       });
-      toastTimerRef.current = setTimeout(() => {
-        useAlarmStore.setState({ toastMessage: null });
-      }, 3200);
-      return;
-    }
+    }, durationMs);
+  };
+
+  const handleSafetyBadgePress = async () => {
+    safeHaptics.selectionAsync();
+    await refreshSafetyChecks();
 
     if (!notifGranted) {
+      showTimedToast(t.notificationsBlockedWarn);
       await initializeAlarmNotifications();
       const after = await checkNotificationPermissions();
       setNotifGranted(after.granted);
       if (!after.granted && !after.canAskAgain) {
         void Linking.openSettings();
       }
-    } else if (!safetyStatus.canUseFullScreenIntent) {
-      alarmSoundPlayer.openFullScreenIntentSettings();
+      void refreshSafetyChecks();
+      return;
     }
-    void refreshSafetyChecks();
+
+    if (!safetyStatus.canUseFullScreenIntent) {
+      showTimedToast(t.safetyPermissionsNeeded);
+      alarmSoundPlayer.openFullScreenIntentSettings();
+      void refreshSafetyChecks();
+      return;
+    }
+
+    if (isVolumeReduced) {
+      const fixLabel = language === 'bn' ? 'বাড়ান' : 'TURN UP';
+      showTimedToast(
+        t.volumeLowWarn(safetyStatus.alarmVolumePercent),
+        fixLabel,
+        () => {
+          void alarmSoundPlayer.raiseAlarmVolumeToSafeLevel().then(() => {
+            void refreshSafetyChecks();
+            useAlarmStore.getState().hideToast();
+          });
+        },
+        4800
+      );
+      return;
+    }
+
+    if (isBatteryLow) {
+      showTimedToast(t.batteryLowWarn(safetyStatus.batteryLevel));
+      return;
+    }
+
+    showTimedToast(t.safetyAllSystemsGo, null, null, 3200);
   };
 
   const handleOpenSettings = () => {
     safeHaptics.selectionAsync();
     onOpenSettings?.();
   };
+
+  const badgeBgColor =
+    badgeStatus === 'healthy'
+      ? 'rgba(16, 185, 129, 0.12)'
+      : badgeStatus === 'warning'
+        ? 'rgba(245, 158, 11, 0.15)'
+        : 'rgba(239, 68, 68, 0.14)';
+
+  const badgeBorderColor =
+    badgeStatus === 'healthy'
+      ? 'rgba(16, 185, 129, 0.35)'
+      : badgeStatus === 'warning'
+        ? 'rgba(245, 158, 11, 0.45)'
+        : 'rgba(239, 68, 68, 0.40)';
+
+  const accessibilityStatusLabel =
+    badgeStatus === 'healthy'
+      ? t.safetyAllSystemsGo
+      : !isPermissionsReady
+        ? t.safetyPermissionsNeeded
+        : isVolumeReduced
+          ? t.volumeLowWarn(safetyStatus.alarmVolumePercent)
+          : t.batteryLowWarn(safetyStatus.batteryLevel);
 
   return (
     <View
@@ -168,24 +248,20 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={() => void handleSafetyBadgePress()}
-            accessibilityLabel={
-              isPermissionsReady ? t.safetyAllSystemsGo : t.safetyPermissionsNeeded
-            }
+            accessibilityLabel={accessibilityStatusLabel}
             style={[
               styles.iconBtn,
               {
-                backgroundColor: isPermissionsReady
-                  ? 'rgba(16, 185, 129, 0.12)'
-                  : 'rgba(239, 68, 68, 0.14)',
-                borderColor: isPermissionsReady
-                  ? 'rgba(16, 185, 129, 0.35)'
-                  : 'rgba(239, 68, 68, 0.40)',
+                backgroundColor: badgeBgColor,
+                borderColor: badgeBorderColor,
                 borderRadius: radii.chip,
               },
             ]}
           >
-            {isPermissionsReady ? (
+            {badgeStatus === 'healthy' ? (
               <ShieldCheck size={18} color={colors.success} />
+            ) : badgeStatus === 'warning' ? (
+              <AlertTriangle size={18} color="#F59E0B" strokeWidth={2.3} />
             ) : (
               <X size={18} color={colors.danger} strokeWidth={2.5} />
             )}

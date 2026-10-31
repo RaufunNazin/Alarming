@@ -49,10 +49,14 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   const categories = useSettingsStore((s) => s.categories);
   const isEscalatingMode = intervalModeType === 'escalating';
 
-  const { translateY, keyboardHeight, dragHandlePanHandlers } = useSheetModalGesture(
-    visible,
-    onClose
-  );
+  const {
+    translateY,
+    backdropOpacity,
+    keyboardHeight,
+    onSheetLayout,
+    dragHandlePanHandlers,
+    sheetPanHandlers,
+  } = useSheetModalGesture(visible, onClose);
 
   const alarmTabs: { key: AlarmType; label: string }[] = [
     { key: 'single', label: t.modeSingle },
@@ -71,6 +75,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   const [offsetDirection, setOffsetDirection] = useState<'before' | 'after'>('before');
   const [alarmCount, setAlarmCount] = useState(10);
   const [intervalMinutes, setIntervalMinutes] = useState(10);
+  const [repeatDays, setRepeatDays] = useState<number[]>([]);
   const [category, setCategory] = useState<string | undefined>(undefined);
 
   // When opened, reset to next-hour defaults + user settings defaults and last selected type
@@ -94,6 +99,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       setOffsetDirection(settings.defaultOffsetDirection || 'before');
       setAlarmCount(settings.defaultAlarmCount || 10);
       setIntervalMinutes(settings.defaultIntervalMinutes || 10);
+      setRepeatDays([]);
       setCategory(undefined);
     }
   }, [visible]);
@@ -179,6 +185,15 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
     isEscalatingMode,
   ]);
 
+  const toggleRepeatDay = (dayIndex: number) => {
+    safeHaptics.selectionAsync();
+    setRepeatDays((prev) =>
+      prev.includes(dayIndex)
+        ? prev.filter((d) => d !== dayIndex)
+        : [...prev, dayIndex].sort((a, b) => a - b)
+    );
+  };
+
   const handleSave = () => {
     Keyboard.dismiss();
     const generatedSequence =
@@ -196,8 +211,8 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       alarmCount: alarmType === 'offset' ? alarmCount : undefined,
       intervalMinutes: alarmType !== 'single' ? intervalMinutes : undefined,
       isEscalating: alarmType !== 'single' ? isEscalatingMode : undefined,
-      repeatDays: [],
-      isOneOff: true,
+      repeatDays,
+      isOneOff: repeatDays.length === 0,
       dismissedForToday: false,
       generatedSequence,
       category,
@@ -224,6 +239,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       alarmCount,
       intervalMinutes,
       isEscalating: alarmType !== 'single' ? isEscalatingMode : false,
+      repeatDays,
     });
   }, [
     visible,
@@ -236,21 +252,31 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
     alarmCount,
     intervalMinutes,
     isEscalatingMode,
+    repeatDays,
   ]);
 
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View
         style={[
           styles.modalOverlay,
           {
-            backgroundColor: colors.overlayBackdrop,
             paddingBottom: keyboardHeight,
           },
         ]}
       >
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: colors.overlayBackdrop,
+              opacity: backdropOpacity,
+            },
+          ]}
+        />
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={() => {
@@ -261,6 +287,8 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
         />
 
         <Animated.View
+          onLayout={onSheetLayout}
+          {...sheetPanHandlers}
           style={[
             styles.modalContent,
             shadows.modal,
@@ -631,6 +659,52 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               </View>
             )}
 
+            {/* Repeat Days Selector */}
+            <View style={styles.sectionContainer}>
+              <Text
+                style={[
+                  styles.sectionHeading,
+                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                ]}
+              >
+                {t.repeatDaysLabel.toUpperCase()}
+              </Text>
+              <View style={styles.repeatRow}>
+                {t.dayInitials.map((dayInitial, idx) => {
+                  const isDaySelected = repeatDays.includes(idx);
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      activeOpacity={0.8}
+                      onPress={() => toggleRepeatDay(idx)}
+                      style={[
+                        styles.dayPill,
+                        {
+                          backgroundColor: isDaySelected ? colors.primary : colors.surface,
+                          borderColor: isDaySelected
+                            ? colors.primaryLight
+                            : colors.surfaceBorder,
+                          borderRadius: radii.chip,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dayPillText,
+                          {
+                            color: isDaySelected ? '#FFFFFF' : colors.textSecondary,
+                            fontFamily: typography.numbersBold,
+                          },
+                        ]}
+                      >
+                        {dayInitial}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
             {/* Category Tag Selector */}
             {categories.length > 0 && (
               <View style={styles.sectionContainer}>
@@ -874,6 +948,21 @@ const styles = StyleSheet.create({
   },
   categoryChipText: {
     fontSize: 12,
+  },
+  repeatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  dayPill: {
+    flex: 1,
+    height: 38,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayPillText: {
+    fontSize: 13,
   },
   intervalTimesContainer: {
     marginHorizontal: 16,

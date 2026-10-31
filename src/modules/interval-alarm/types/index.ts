@@ -51,6 +51,7 @@ export interface AlarmItem {
   lastDismissedDate?: string; // 'YYYY-MM-DD'
   notificationIds?: string[];
   snoozedUntil?: number; // epoch ms
+  snoozedStepIndex?: number; // preserves which step in the sequence was snoozed
 }
 
 export interface ActivePowerNap {

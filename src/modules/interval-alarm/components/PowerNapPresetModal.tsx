@@ -31,7 +31,13 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
   const defaultPowerNapMinutes = useSettingsStore((s) => s.defaultPowerNapMinutes);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const startPowerNap = useAlarmStore((s) => s.startPowerNap);
-  const { translateY, dragHandlePanHandlers } = useSheetModalGesture(visible, onClose);
+  const {
+    translateY,
+    backdropOpacity,
+    onSheetLayout,
+    dragHandlePanHandlers,
+    sheetPanHandlers,
+  } = useSheetModalGesture(visible, onClose);
 
   const [selectedMinutes, setSelectedMinutes] = useState(defaultPowerNapMinutes);
 
@@ -64,13 +70,25 @@ export const PowerNapPresetModal: React.FC<PowerNapPresetModalProps> = ({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={[styles.backdrop, { backgroundColor: colors.overlayBackdrop }]}>
+      <View style={styles.backdrop}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: colors.overlayBackdrop,
+              opacity: backdropOpacity,
+            },
+          ]}
+        />
         <Pressable style={styles.backdropDismissArea} onPress={onClose} />
 
         <Animated.View
+          onLayout={onSheetLayout}
+          {...sheetPanHandlers}
           style={[
             styles.sheet,
             {

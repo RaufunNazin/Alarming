@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Modal,
   View,
@@ -38,6 +38,7 @@ import {
   getBaseAlarmSteps,
   formatRepeatDays,
   formatSkippedDateLabel,
+  sortCustomStepsChronologically,
 } from '../engine/intervalEngine';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 import { useSheetModalGesture } from './useSheetModalGesture';
@@ -51,6 +52,162 @@ interface AlarmEditModalProps {
   onDuplicate?: (id: string) => void;
   onToggleSkipNext?: (id: string) => void;
 }
+
+interface SequenceStepRowProps {
+  step: CustomAlarmStep;
+  idx: number;
+  isLastActive: boolean;
+  onPressEditTime: (idx: number) => void;
+  onNudgeTime: (idx: number, deltaMinutes: number) => void;
+  onToggleEnabled: (idx: number) => void;
+}
+
+const SequenceStepRow = React.memo<SequenceStepRowProps>(
+  ({ step, idx, isLastActive, onPressEditTime, onNudgeTime, onToggleEnabled }) => {
+    const { colors, typography, radii } = useTheme();
+    const { formatNum, formatTime12h: formatTime12hLocal } = useTranslation();
+    const isStepOn = step.isEnabled;
+
+    return (
+      <View
+        style={[
+          styles.timingRowCard,
+          {
+            backgroundColor: isStepOn ? colors.cardOnBg : colors.cardOffBg,
+            borderColor: isStepOn ? colors.cardOnBorder : colors.cardOffBorder,
+            borderRadius: radii.buttonMedium,
+            opacity: isStepOn ? 1 : 0.6,
+          },
+        ]}
+      >
+        {/* Step Index Pill */}
+        <View
+          style={[
+            styles.stepIndexBadge,
+            {
+              backgroundColor: isStepOn ? colors.primaryMuted : colors.surfaceSubtle,
+              borderRadius: radii.chipInner,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.stepIndexText,
+              {
+                color: isStepOn ? colors.accent : colors.textMuted,
+                fontFamily: typography.numbersBold,
+              },
+            ]}
+          >
+            #{formatNum(idx + 1)}
+          </Text>
+        </View>
+
+        {/* Pressable Time Value (Opens Radial Clock for this step) */}
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => onPressEditTime(idx)}
+          style={styles.stepTimeBtn}
+          accessibilityLabel={`Edit alarm ${idx + 1} time`}
+        >
+          <Text
+            style={[
+              styles.stepTimeText,
+              {
+                color: isStepOn ? colors.textPrimary : colors.textMuted,
+                fontFamily: typography.numbersBold,
+              },
+            ]}
+          >
+            {formatTime12hLocal(step.hour, step.minute).full}
+          </Text>
+          <Edit3
+            size={12}
+            color={isStepOn ? colors.textSecondary : colors.textMuted}
+            strokeWidth={2}
+          />
+        </TouchableOpacity>
+
+        {/* Inline -1m / +1m Nudge Controls */}
+        <View
+          style={[
+            styles.nudgeGroup,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.surfaceBorder,
+              borderRadius: radii.chip,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => onNudgeTime(idx, -1)}
+            style={styles.nudgeBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+            accessibilityLabel={`Subtract 1 minute from alarm ${idx + 1}`}
+          >
+            <Minus
+              size={13}
+              color={isStepOn ? colors.textSecondary : colors.textMuted}
+              strokeWidth={2.4}
+            />
+          </TouchableOpacity>
+
+          <Text
+            style={[
+              styles.nudgeUnitText,
+              {
+                color: colors.textMuted,
+                fontFamily: typography.numbersRegular,
+              },
+            ]}
+          >
+            {formatNum(1)}m
+          </Text>
+
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => onNudgeTime(idx, 1)}
+            style={styles.nudgeBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 6 }}
+            accessibilityLabel={`Add 1 minute to alarm ${idx + 1}`}
+          >
+            <Plus
+              size={13}
+              color={isStepOn ? colors.textSecondary : colors.textMuted}
+              strokeWidth={2.4}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Individual Step ON/OFF Toggle */}
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => onToggleEnabled(idx)}
+          disabled={isLastActive}
+          style={[
+            styles.stepToggleBtn,
+            {
+              backgroundColor: isStepOn ? colors.squircleOnBg : colors.squircleOffBg,
+              borderColor: isStepOn ? colors.squircleBorderOn : colors.squircleBorder,
+              borderRadius: radii.chip,
+            },
+          ]}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: isStepOn }}
+          accessibilityLabel={`Alarm ${idx + 1} ${isStepOn ? 'enabled' : 'disabled'}`}
+        >
+          {isStepOn ? (
+            <Bell size={15} color={colors.squircleIconOn} strokeWidth={2.3} />
+          ) : (
+            <BellOff size={14} color={colors.squircleIconOff} strokeWidth={2} />
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  }
+);
+SequenceStepRow.displayName = 'SequenceStepRow';
 
 function buildUniformCustomSteps(
   type: AlarmType,
@@ -90,15 +247,19 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   onToggleSkipNext,
 }) => {
   const { colors, typography, radii, shadows, themeMode } = useTheme();
-  const { t, language, formatNum, formatTime12h: formatTime12hLocal } = useTranslation();
+  const { t, language, formatTime12h: formatTime12hLocal } = useTranslation();
   const showAlarmSequenceSection = useSettingsStore((s) => s.showAlarmSequenceSection);
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
   const categories = useSettingsStore((s) => s.categories);
 
-  const { translateY, keyboardHeight, dragHandlePanHandlers } = useSheetModalGesture(
-    visible,
-    onClose
-  );
+  const {
+    translateY,
+    backdropOpacity,
+    keyboardHeight,
+    onSheetLayout,
+    dragHandlePanHandlers,
+    sheetPanHandlers,
+  } = useSheetModalGesture(visible, onClose);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const deleteConfirmGesture = useSheetModalGesture(showDeleteConfirm, () =>
@@ -124,9 +285,15 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   const [isGranularOpen, setIsGranularOpen] = useState(false);
   const [clockModalVisible, setClockModalVisible] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
+  const initializedAlarmIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (visible && alarm) {
+    if (!visible) {
+      initializedAlarmIdRef.current = null;
+      return;
+    }
+    if (visible && alarm && initializedAlarmIdRef.current !== alarm.id) {
+      initializedAlarmIdRef.current = alarm.id;
       const initType = alarm.type;
       const initStartH = alarm.startHour;
       const initStartM = alarm.startMinute;
@@ -222,6 +389,75 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
     return false;
   }, [steps, uniformReferenceSteps]);
 
+  // Sync top-level start/end times whenever individual steps are modified
+  const syncEndpointsFromSteps = useCallback(
+    (
+      nextSteps: CustomAlarmStep[],
+      nextType: AlarmType = alarmType,
+      nextDir: 'before' | 'after' = offsetDirection
+    ) => {
+      if (nextSteps.length === 0) return;
+      const first = nextSteps[0];
+      const last = nextSteps[nextSteps.length - 1];
+
+      if (nextType === 'offset' && nextDir === 'before') {
+        setStartHour(last.hour);
+        setStartMinute(last.minute);
+      } else {
+        setStartHour(first.hour);
+        setStartMinute(first.minute);
+        if (nextType === 'interval') {
+          setEndHour(last.hour);
+          setEndMinute(last.minute);
+        }
+      }
+    },
+    [alarmType, offsetDirection]
+  );
+
+  const handlePressEditStepTime = useCallback((idx: number) => {
+    setEditingStepIndex(idx);
+    setClockModalVisible(true);
+  }, []);
+
+  const handleToggleStepEnabled = useCallback((index: number) => {
+    setSteps((prev) => {
+      const target = prev[index];
+      if (!target) return prev;
+      const activeCount = prev.filter((s) => s.isEnabled).length;
+      if (target.isEnabled && activeCount <= 1) {
+        return prev;
+      }
+      return prev.map((s, idx) =>
+        idx === index ? { ...s, isEnabled: !s.isEnabled } : s
+      );
+    });
+  }, []);
+
+  const handleNudgeStepTime = useCallback(
+    (index: number, deltaMinutes: number) => {
+      setSteps((prev) => {
+        const target = prev[index];
+        if (!target) return prev;
+        const totalMin =
+          (target.hour * 60 + target.minute + deltaMinutes + 24 * 60) % (24 * 60);
+        const modified = prev.map((s, idx) =>
+          idx === index
+            ? {
+                ...s,
+                hour: Math.floor(totalMin / 60),
+                minute: totalMin % 60,
+              }
+            : s
+        );
+        const sorted = sortCustomStepsChronologically(modified);
+        syncEndpointsFromSteps(sorted, alarmType, offsetDirection);
+        return sorted;
+      });
+    },
+    [alarmType, offsetDirection, syncEndpointsFromSteps]
+  );
+
   if (!visible || !alarm) return null;
 
   const totalStepCount = steps.length;
@@ -232,25 +468,6 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       setRepeatDays(repeatDays.filter((d) => d !== dayIndex));
     } else {
       setRepeatDays([...repeatDays, dayIndex].sort());
-    }
-  };
-
-  // Sync top-level start/end times whenever individual steps are modified
-  const syncEndpointsFromSteps = (nextSteps: CustomAlarmStep[], nextType: AlarmType = alarmType) => {
-    if (nextSteps.length === 0) return;
-    const first = nextSteps[0];
-    const last = nextSteps[nextSteps.length - 1];
-
-    if (nextType === 'offset' && offsetDirection === 'before') {
-      setStartHour(last.hour);
-      setStartMinute(last.minute);
-    } else {
-      setStartHour(first.hour);
-      setStartMinute(first.minute);
-      if (nextType === 'interval') {
-        setEndHour(last.hour);
-        setEndMinute(last.minute);
-      }
     }
   };
 
@@ -269,8 +486,9 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
           ? { ...s, hour: result.startHour, minute: result.startMinute }
           : s
       );
-      setSteps(nextSteps);
-      syncEndpointsFromSteps(nextSteps, alarmType);
+      const sortedSteps = sortCustomStepsChronologically(nextSteps);
+      setSteps(sortedSteps);
+      syncEndpointsFromSteps(sortedSteps, alarmType, offsetDirection);
       setEditingStepIndex(null);
       setClockModalVisible(false);
       return;
@@ -279,6 +497,20 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
     // Editing the macro alarm time / mode
     const nextEscalating =
       result.type !== 'single' && (isEscalating || intervalModeType === 'escalating');
+    let effectiveInterval = intervalMinutes;
+    if (result.type === 'interval') {
+      const startTotal = result.startHour * 60 + result.startMinute;
+      let endTotal = result.endHour * 60 + result.endMinute;
+      if (endTotal <= startTotal) {
+        endTotal += 24 * 60;
+      }
+      const windowSpan = endTotal - startTotal;
+      if (windowSpan > 0 && windowSpan < effectiveInterval) {
+        effectiveInterval = Math.max(1, windowSpan);
+        setIntervalMinutes(effectiveInterval);
+      }
+    }
+
     setAlarmType(result.type);
     setStartHour(result.startHour);
     setStartMinute(result.startMinute);
@@ -295,7 +527,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       result.endMinute,
       result.offsetDirection,
       alarmCount,
-      intervalMinutes,
+      effectiveInterval,
       nextEscalating
     );
     setSteps(rebuilt);
@@ -395,7 +627,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       const nextSteps = [...steps, newStep];
       setSteps(nextSteps);
       setAlarmCount(nextSteps.length);
-      syncEndpointsFromSteps(nextSteps, effectiveType);
+      syncEndpointsFromSteps(nextSteps, effectiveType, offsetDirection);
     } else {
       const nextSteps = steps.slice(0, nextCount);
       // Ensure at least one step stays enabled
@@ -404,38 +636,8 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       }
       setSteps(nextSteps);
       setAlarmCount(nextSteps.length);
-      syncEndpointsFromSteps(nextSteps, effectiveType);
+      syncEndpointsFromSteps(nextSteps, effectiveType, offsetDirection);
     }
-  };
-
-  const handleToggleStepEnabled = (index: number) => {
-    const target = steps[index];
-    if (!target) return;
-    // Ensure at least 1 alarm timing remains enabled
-    if (target.isEnabled && enabledStepCount <= 1) {
-      return;
-    }
-    const nextSteps = steps.map((s, idx) =>
-      idx === index ? { ...s, isEnabled: !s.isEnabled } : s
-    );
-    setSteps(nextSteps);
-  };
-
-  const handleNudgeStepTime = (index: number, deltaMinutes: number) => {
-    const target = steps[index];
-    if (!target) return;
-    const totalMin = (target.hour * 60 + target.minute + deltaMinutes + 24 * 60) % (24 * 60);
-    const nextSteps = steps.map((s, idx) =>
-      idx === index
-        ? {
-            ...s,
-            hour: Math.floor(totalMin / 60),
-            minute: totalMin % 60,
-          }
-        : s
-    );
-    setSteps(nextSteps);
-    syncEndpointsFromSteps(nextSteps, alarmType);
   };
 
   const handleResetCustomSteps = () => {
@@ -463,17 +665,25 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
         ? effectiveActive.map((s) => formatTime12h(s.hour, s.minute))
         : undefined;
 
+    const hadCustomSteps = Boolean(alarm.customSteps && alarm.customSteps.length > 0);
+    const stepsChanged =
+      isStepsCustomized !== hadCustomSteps ||
+      (isStepsCustomized &&
+        JSON.stringify(steps) !== JSON.stringify(alarm.customSteps || []));
+
     const timeOrConfigChanged =
       startHour !== alarm.startHour ||
       startMinute !== alarm.startMinute ||
-      endHour !== (alarm.endHour ?? (alarm.startHour + 1) % 24) ||
-      endMinute !== (alarm.endMinute ?? alarm.startMinute) ||
-      intervalMinutes !== (alarm.intervalMinutes ?? 10) ||
-      offsetDirection !== (alarm.offsetDirection ?? 'before') ||
-      alarmCount !== (alarm.alarmCount ?? 10) ||
-      isEscalating !== Boolean(alarm.isEscalating) ||
+      (alarmType === 'interval' &&
+        (endHour !== (alarm.endHour ?? (alarm.startHour + 1) % 24) ||
+          endMinute !== (alarm.endMinute ?? alarm.startMinute))) ||
+      (alarmType !== 'single' && intervalMinutes !== (alarm.intervalMinutes ?? 10)) ||
+      (alarmType === 'offset' &&
+        (offsetDirection !== (alarm.offsetDirection ?? 'before') ||
+          steps.length !== (alarm.alarmCount ?? 10))) ||
+      (alarmType !== 'single' && isEscalating !== Boolean(alarm.isEscalating)) ||
       alarmType !== alarm.type ||
-      JSON.stringify(steps) !== JSON.stringify(alarm.customSteps || []) ||
+      stepsChanged ||
       JSON.stringify(repeatDays) !== JSON.stringify(alarm.repeatDays || []);
 
     const finalIsEnabled = !alarm.isEnabled && timeOrConfigChanged ? true : alarm.isEnabled;
@@ -494,7 +704,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
       isOneOff: !repeatDays || repeatDays.length === 0,
       dismissedForToday: alarm.dismissedForToday,
       generatedSequence,
-      customSteps: steps,
+      customSteps: isStepsCustomized ? steps : undefined,
       category,
       skipNextDate: alarm.skipNextDate,
     };
@@ -547,39 +757,63 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   const editingStep = editingStepIndex !== null ? steps[editingStepIndex] : null;
 
   return (
-    <>
-      <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-        <View
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={() => {
+        if (showDeleteConfirm) {
+          setShowDeleteConfirm(false);
+        } else if (clockModalVisible) {
+          setEditingStepIndex(null);
+          setClockModalVisible(false);
+        } else {
+          onClose();
+        }
+      }}
+    >
+      <View
+        style={[
+          styles.modalOverlay,
+          {
+            paddingBottom: keyboardHeight,
+          },
+        ]}
+      >
+        <Animated.View
+          pointerEvents="none"
           style={[
-            styles.modalOverlay,
+            StyleSheet.absoluteFill,
             {
               backgroundColor: colors.overlayBackdrop,
-              paddingBottom: keyboardHeight,
+              opacity: backdropOpacity,
+            },
+          ]}
+        />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+          }}
+          accessibilityLabel="Close edit modal"
+        />
+
+        <Animated.View
+          onLayout={onSheetLayout}
+          {...sheetPanHandlers}
+          style={[
+            styles.modalContent,
+            shadows.modal,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.surfaceBorder,
+              borderTopLeftRadius: radii.modalOuter,
+              borderTopRightRadius: radii.modalOuter,
+              transform: [{ translateY }],
             },
           ]}
         >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => {
-              Keyboard.dismiss();
-              onClose();
-            }}
-            accessibilityLabel="Close edit modal"
-          />
-
-          <Animated.View
-            style={[
-              styles.modalContent,
-              shadows.modal,
-              {
-                backgroundColor: colors.background,
-                borderColor: colors.surfaceBorder,
-                borderTopLeftRadius: radii.modalOuter,
-                borderTopRightRadius: radii.modalOuter,
-                transform: [{ translateY }],
-              },
-            ]}
-          >
             {/* Top Drag Handle Zone */}
             <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
               <View
@@ -1163,166 +1397,17 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
                         {/* 4. Individual Timing Rows */}
                         <View style={styles.timingsList}>
-                          {steps.map((step, idx) => {
-                            const isStepOn = step.isEnabled;
-                            const isLastActive = isStepOn && enabledStepCount <= 1;
-
-                            return (
-                              <View
-                                key={`step_${idx}`}
-                                style={[
-                                  styles.timingRowCard,
-                                  {
-                                    backgroundColor: isStepOn ? colors.cardOnBg : colors.cardOffBg,
-                                    borderColor: isStepOn
-                                      ? colors.cardOnBorder
-                                      : colors.cardOffBorder,
-                                    borderRadius: radii.buttonMedium,
-                                    opacity: isStepOn ? 1 : 0.6,
-                                  },
-                                ]}
-                              >
-                                {/* Step Index Pill */}
-                                <View
-                                  style={[
-                                    styles.stepIndexBadge,
-                                    {
-                                      backgroundColor: isStepOn
-                                        ? colors.primaryMuted
-                                        : colors.surfaceSubtle,
-                                      borderRadius: radii.chipInner,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.stepIndexText,
-                                      {
-                                        color: isStepOn ? colors.accent : colors.textMuted,
-                                        fontFamily: typography.numbersBold,
-                                      },
-                                    ]}
-                                  >
-                                    #{formatNum(idx + 1)}
-                                  </Text>
-                                </View>
-
-                                {/* Pressable Time Value (Opens Radial Clock for this step) */}
-                                <TouchableOpacity
-                                  activeOpacity={0.75}
-                                  onPress={() => {
-                                    setEditingStepIndex(idx);
-                                    setClockModalVisible(true);
-                                  }}
-                                  style={styles.stepTimeBtn}
-                                  accessibilityLabel={`Edit alarm ${idx + 1} time`}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.stepTimeText,
-                                      {
-                                        color: isStepOn ? colors.textPrimary : colors.textMuted,
-                                        fontFamily: typography.numbersBold,
-                                      },
-                                    ]}
-                                  >
-                                    {formatTime12hLocal(step.hour, step.minute).full}
-                                  </Text>
-                                  <Edit3
-                                    size={12}
-                                    color={isStepOn ? colors.textSecondary : colors.textMuted}
-                                    strokeWidth={2}
-                                  />
-                                </TouchableOpacity>
-
-                                {/* Inline -1m / +1m Nudge Controls */}
-                                <View
-                                  style={[
-                                    styles.nudgeGroup,
-                                    {
-                                      backgroundColor: colors.background,
-                                      borderColor: colors.surfaceBorder,
-                                      borderRadius: radii.chip,
-                                    },
-                                  ]}
-                                >
-                                  <TouchableOpacity
-                                    activeOpacity={0.7}
-                                    onPress={() => handleNudgeStepTime(idx, -1)}
-                                    style={styles.nudgeBtn}
-                                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
-                                    accessibilityLabel={`Subtract 1 minute from alarm ${idx + 1}`}
-                                  >
-                                    <Minus
-                                      size={13}
-                                      color={isStepOn ? colors.textSecondary : colors.textMuted}
-                                      strokeWidth={2.4}
-                                    />
-                                  </TouchableOpacity>
-
-                                  <Text
-                                    style={[
-                                      styles.nudgeUnitText,
-                                      {
-                                        color: colors.textMuted,
-                                        fontFamily: typography.numbersRegular,
-                                      },
-                                    ]}
-                                  >
-                                    {formatNum(1)}m
-                                  </Text>
-
-                                  <TouchableOpacity
-                                    activeOpacity={0.7}
-                                    onPress={() => handleNudgeStepTime(idx, 1)}
-                                    style={styles.nudgeBtn}
-                                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 6 }}
-                                    accessibilityLabel={`Add 1 minute to alarm ${idx + 1}`}
-                                  >
-                                    <Plus
-                                      size={13}
-                                      color={isStepOn ? colors.textSecondary : colors.textMuted}
-                                      strokeWidth={2.4}
-                                    />
-                                  </TouchableOpacity>
-                                </View>
-
-                                {/* Individual Step ON/OFF Toggle */}
-                                <TouchableOpacity
-                                  activeOpacity={0.75}
-                                  onPress={() => handleToggleStepEnabled(idx)}
-                                  disabled={isLastActive}
-                                  style={[
-                                    styles.stepToggleBtn,
-                                    {
-                                      backgroundColor: isStepOn
-                                        ? colors.squircleOnBg
-                                        : colors.squircleOffBg,
-                                      borderColor: isStepOn
-                                        ? colors.squircleBorderOn
-                                        : colors.squircleBorder,
-                                      borderRadius: radii.chip,
-                                    },
-                                  ]}
-                                  accessibilityRole="switch"
-                                  accessibilityState={{ checked: isStepOn }}
-                                  accessibilityLabel={`Alarm ${idx + 1} ${
-                                    isStepOn ? 'enabled' : 'disabled'
-                                  }`}
-                                >
-                                  {isStepOn ? (
-                                    <Bell size={15} color={colors.squircleIconOn} strokeWidth={2.3} />
-                                  ) : (
-                                    <BellOff
-                                      size={14}
-                                      color={colors.squircleIconOff}
-                                      strokeWidth={2}
-                                    />
-                                  )}
-                                </TouchableOpacity>
-                              </View>
-                            );
-                          })}
+                          {steps.map((step, idx) => (
+                            <SequenceStepRow
+                              key={`step_${idx}`}
+                              step={step}
+                              idx={idx}
+                              isLastActive={step.isEnabled && enabledStepCount <= 1}
+                              onPressEditTime={handlePressEditStepTime}
+                              onNudgeTime={handleNudgeStepTime}
+                              onToggleEnabled={handleToggleStepEnabled}
+                            />
+                          ))}
                         </View>
                       </View>
                     )}
@@ -1489,150 +1574,163 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
             </View>
           </Animated.View>
         </View>
-      </Modal>
 
-      {/* Clock Edit Submodal (For macro time or individual step time) */}
-      <ClockEditModal
-        visible={clockModalVisible}
-        initialType={editingStep ? 'single' : alarmType}
-        initialStartHour={editingStep ? editingStep.hour : startHour}
-        initialStartMinute={editingStep ? editingStep.minute : startMinute}
-        initialEndHour={endHour}
-        initialEndMinute={endMinute}
-        initialOffsetDirection={offsetDirection}
-        onClose={() => {
-          setEditingStepIndex(null);
-          setClockModalVisible(false);
-        }}
-        onConfirm={handleClockConfirm}
-      />
+        {/* Clock Edit Submodal rendered inline to avoid stacked Modal flicker */}
+        <ClockEditModal
+          visible={clockModalVisible}
+          renderInline
+          hideModeSwitcher={editingStep !== null}
+          initialType={editingStep ? 'single' : alarmType}
+          initialStartHour={editingStep ? editingStep.hour : startHour}
+          initialStartMinute={editingStep ? editingStep.minute : startMinute}
+          initialEndHour={endHour}
+          initialEndMinute={endMinute}
+          initialOffsetDirection={offsetDirection}
+          alarmCount={alarmCount}
+          intervalMinutes={intervalMinutes}
+          isEscalating={isEscalating}
+          repeatDays={repeatDays}
+          onClose={() => {
+            setEditingStepIndex(null);
+            setClockModalVisible(false);
+          }}
+          onConfirm={handleClockConfirm}
+        />
 
-      {/* Custom Styled Delete Confirmation Bottom Sheet Modal */}
-      <Modal
-        visible={showDeleteConfirm}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowDeleteConfirm(false)}
-      >
-        <View
-          style={[
-            styles.confirmBackdrop,
-            { backgroundColor: colors.overlayBackdrop },
-          ]}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setShowDeleteConfirm(false)}
-          />
-          <Animated.View
-            {...deleteConfirmGesture.dragHandlePanHandlers}
+        {/* Custom Styled Delete Confirmation Bottom Sheet Overlay */}
+        {showDeleteConfirm && (
+          <View
             style={[
-              styles.confirmCard,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.surfaceBorder,
-                borderTopLeftRadius: radii.modalOuter,
-                borderTopRightRadius: radii.modalOuter,
-                transform: [{ translateY: deleteConfirmGesture.translateY }],
-              },
-              shadows.modal,
+              StyleSheet.absoluteFill,
+              styles.confirmBackdrop,
+              { zIndex: 110, elevation: 110 },
             ]}
           >
-            <View
+            <Animated.View
+              pointerEvents="none"
               style={[
-                styles.confirmDragHandle,
+                StyleSheet.absoluteFill,
                 {
-                  backgroundColor: colors.surfaceBorder,
-                  borderRadius: radii.handle,
+                  backgroundColor: colors.overlayBackdrop,
+                  opacity: deleteConfirmGesture.backdropOpacity,
                 },
               ]}
             />
-            <View
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setShowDeleteConfirm(false)}
+            />
+            <Animated.View
+              onLayout={deleteConfirmGesture.onSheetLayout}
+              {...deleteConfirmGesture.sheetPanHandlers}
               style={[
-                styles.confirmIconContainer,
+                styles.confirmCard,
                 {
-                  backgroundColor: colors.danger + '18',
-                  borderRadius: radii.cardInner,
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.surfaceBorder,
+                  borderTopLeftRadius: radii.modalOuter,
+                  borderTopRightRadius: radii.modalOuter,
+                  transform: [{ translateY: deleteConfirmGesture.translateY }],
                 },
+                shadows.modal,
               ]}
             >
-              <Trash2 size={24} color={colors.danger} strokeWidth={2.2} />
-            </View>
-
-            <Text
-              style={[
-                styles.confirmTitle,
-                { color: colors.textPrimary, fontFamily: typography.numbersBold },
-              ]}
-            >
-              {language === 'bn' ? 'অ্যালার্ম মুছে ফেলবেন?' : 'Delete Alarm?'}
-            </Text>
-
-            <Text
-              style={[
-                styles.confirmMessage,
-                { color: colors.textSecondary, fontFamily: typography.numbersRegular },
-              ]}
-            >
-              {language === 'bn'
-                ? 'মুছে ফেললে এই অ্যালার্মটি আর ফিরে পাওয়া যাবে না।'
-                : 'Are you sure you want to delete this alarm? This action cannot be undone.'}
-            </Text>
-
-            <View style={styles.confirmActionsRow}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => setShowDeleteConfirm(false)}
+              <View
+                {...deleteConfirmGesture.dragHandlePanHandlers}
                 style={[
-                  styles.confirmCancelBtn,
+                  styles.confirmDragHandle,
                   {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.button,
+                    backgroundColor: colors.surfaceBorder,
+                    borderRadius: radii.handle,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.confirmIconContainer,
+                  {
+                    backgroundColor: colors.danger + '18',
+                    borderRadius: radii.cardInner,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.confirmCancelText,
-                    { color: colors.textSecondary, fontFamily: typography.numbers },
-                  ]}
-                >
-                  {t.cancel}
-                </Text>
-              </TouchableOpacity>
+                <Trash2 size={24} color={colors.danger} strokeWidth={2.2} />
+              </View>
 
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => {
-                  setShowDeleteConfirm(false);
-                  if (onDelete) {
-                    onDelete(alarm.id);
-                  }
-                  onClose();
-                }}
+              <Text
                 style={[
-                  styles.confirmDeleteBtn,
-                  {
-                    backgroundColor: colors.danger,
-                    borderRadius: radii.button,
-                  },
+                  styles.confirmTitle,
+                  { color: colors.textPrimary, fontFamily: typography.numbersBold },
                 ]}
               >
-                <Text
+                {language === 'bn' ? 'অ্যালার্ম মুছে ফেলবেন?' : 'Delete Alarm?'}
+              </Text>
+
+              <Text
+                style={[
+                  styles.confirmMessage,
+                  { color: colors.textSecondary, fontFamily: typography.numbersRegular },
+                ]}
+              >
+                {language === 'bn'
+                  ? 'মুছে ফেললে এই অ্যালার্মটি আর ফিরে পাওয়া যাবে না।'
+                  : 'Are you sure you want to delete this alarm? This action cannot be undone.'}
+              </Text>
+
+              <View style={styles.confirmActionsRow}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setShowDeleteConfirm(false)}
                   style={[
-                    styles.confirmDeleteText,
-                    { color: '#FFFFFF', fontFamily: typography.numbersBold },
+                    styles.confirmCancelBtn,
+                    {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.button,
+                    },
                   ]}
                 >
-                  {t.delete}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        </View>
+                  <Text
+                    style={[
+                      styles.confirmCancelText,
+                      { color: colors.textSecondary, fontFamily: typography.numbers },
+                    ]}
+                  >
+                    {t.cancel}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    if (onDelete) {
+                      onDelete(alarm.id);
+                    }
+                    onClose();
+                  }}
+                  style={[
+                    styles.confirmDeleteBtn,
+                    {
+                      backgroundColor: colors.danger,
+                      borderRadius: radii.button,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.confirmDeleteText,
+                      { color: '#FFFFFF', fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    {t.delete}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </View>
+        )}
       </Modal>
-    </>
   );
 };
 

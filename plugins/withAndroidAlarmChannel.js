@@ -300,6 +300,27 @@ class AlarmSoundModule(reactContext: ReactApplicationContext) : ReactContextBase
             promise.resolve(fallback)
         }
     }
+
+    @ReactMethod
+    fun raiseAlarmVolumeToSafeLevel(promise: Promise) {
+        try {
+            val context = reactApplicationContext
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (audioManager != null) {
+                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM).coerceAtLeast(1)
+                audioManager.setStreamVolume(
+                    AudioManager.STREAM_ALARM,
+                    maxVol,
+                    AudioManager.FLAG_SHOW_UI
+                )
+                promise.resolve(100)
+                return
+            }
+            promise.resolve(100)
+        } catch (e: Exception) {
+            promise.resolve(100)
+        }
+    }
 }
 `;
 
@@ -614,18 +635,147 @@ function withAndroidAlarmPermissions(config) {
           ],
         });
       }
+      // 4. Register AOSP Launcher3 / Pixel Launcher dynamic real-time clock icon metadata
+      if (!mainApplication['meta-data']) {
+        mainApplication['meta-data'] = [];
+      }
+      const clockMetaDataEntries = [
+        {
+          name: 'com.android.launcher3.LEVEL_PER_TICK_ICON_ROUND',
+          attrKey: 'android:resource',
+          attrVal: '@mipmap/ic_launcher_clock',
+        },
+        {
+          name: 'com.android.launcher3.HOUR_LAYER_INDEX',
+          attrKey: 'android:value',
+          attrVal: '0',
+        },
+        {
+          name: 'com.android.launcher3.MINUTE_LAYER_INDEX',
+          attrKey: 'android:value',
+          attrVal: '1',
+        },
+        {
+          name: 'com.android.launcher3.SECOND_LAYER_INDEX',
+          attrKey: 'android:value',
+          attrVal: '2',
+        },
+        {
+          name: 'com.android.launcher3.DEFAULT_HOUR',
+          attrKey: 'android:value',
+          attrVal: '10',
+        },
+        {
+          name: 'com.android.launcher3.DEFAULT_MINUTE',
+          attrKey: 'android:value',
+          attrVal: '10',
+        },
+        {
+          name: 'com.android.launcher3.DEFAULT_SECOND',
+          attrKey: 'android:value',
+          attrVal: '30',
+        },
+      ];
+      for (const entry of clockMetaDataEntries) {
+        const existingMeta = mainApplication['meta-data'].find(
+          (m) => m.$?.['android:name'] === entry.name
+        );
+        if (existingMeta && existingMeta.$) {
+          existingMeta.$[entry.attrKey] = entry.attrVal;
+        } else {
+          mainApplication['meta-data'].push({
+            $: {
+              'android:name': entry.name,
+              [entry.attrKey]: entry.attrVal,
+            },
+          });
+        }
+      }
     }
 
     return config;
   });
 }
 
+const DYNAMIC_CLOCK_ADAPTIVE_ICON_XML = `<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground>
+        <layer-list>
+            <!-- Layer 0: Hour hand (DEFAULT_HOUR=10 -> 300 deg at level 0, 5000 deg span) -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_hour"
+                    android:fromDegrees="300.0"
+                    android:toDegrees="5300.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+            <!-- Layer 1: Minute hand (DEFAULT_MINUTE=10 -> 60 deg at level 0, 60000 deg span) -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_minute"
+                    android:fromDegrees="60.0"
+                    android:toDegrees="60060.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+            <!-- Layer 2: Second hand + center cap (DEFAULT_SECOND=30 -> 180 deg at level 0, 6000 deg span) -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_second"
+                    android:fromDegrees="180.0"
+                    android:toDegrees="6180.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+        </layer-list>
+    </foreground>
+    <monochrome>
+        <layer-list>
+            <!-- Layer 0: Monochrome Hour hand -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_hour"
+                    android:fromDegrees="300.0"
+                    android:toDegrees="5300.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+            <!-- Layer 1: Monochrome Minute hand -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_minute"
+                    android:fromDegrees="60.0"
+                    android:toDegrees="60060.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+            <!-- Layer 2: Monochrome Second hand -->
+            <item>
+                <rotate
+                    android:drawable="@drawable/clock_hand_second"
+                    android:fromDegrees="180.0"
+                    android:toDegrees="6180.0"
+                    android:pivotX="50%"
+                    android:pivotY="50%" />
+            </item>
+            <!-- Layer 3: Static Monochrome Dial Ring & Ticks -->
+            <item android:drawable="@drawable/clock_dial_monochrome" />
+        </layer-list>
+    </monochrome>
+</adaptive-icon>
+`;
+
 function withAndroidAlarmFiles(config) {
   return withDangerousMod(config, [
     'android',
     async (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const platformRoot = config.modRequest.platformProjectRoot;
+
       const targetDir = path.join(
-        config.modRequest.platformProjectRoot,
+        platformRoot,
         'app/src/main/java/com/alarming/app'
       );
       if (!fs.existsSync(targetDir)) {
@@ -645,6 +795,44 @@ function withAndroidAlarmFiles(config) {
       fs.writeFileSync(
         path.join(targetDir, 'AlarmNotificationsService.kt'),
         ALARM_NOTIFICATIONS_SERVICE_CODE,
+        'utf8'
+      );
+
+      // Copy customizable dynamic clock hand PNGs from assets/ into res/drawable-nodpi/
+      const resDir = path.join(platformRoot, 'app/src/main/res');
+      const drawableNoDpiDir = path.join(resDir, 'drawable-nodpi');
+      fs.mkdirSync(drawableNoDpiDir, { recursive: true });
+
+      const clockLayerMapping = [
+        { src: 'assets/clock-hand-hour.png', dest: 'clock_hand_hour.png' },
+        { src: 'assets/clock-hand-minute.png', dest: 'clock_hand_minute.png' },
+        { src: 'assets/clock-hand-second.png', dest: 'clock_hand_second.png' },
+        { src: 'assets/clock-dial-monochrome.png', dest: 'clock_dial_monochrome.png' },
+      ];
+
+      for (const item of clockLayerMapping) {
+        const srcPath = path.join(projectRoot, item.src);
+        if (fs.existsSync(srcPath)) {
+          fs.copyFileSync(srcPath, path.join(drawableNoDpiDir, item.dest));
+        }
+      }
+
+      // Write layered adaptive clock icon XMLs for both dynamic ClockDrawableWrapper and standard launchers
+      const mipmapV26Dir = path.join(resDir, 'mipmap-anydpi-v26');
+      fs.mkdirSync(mipmapV26Dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(mipmapV26Dir, 'ic_launcher_clock.xml'),
+        DYNAMIC_CLOCK_ADAPTIVE_ICON_XML,
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(mipmapV26Dir, 'ic_launcher.xml'),
+        DYNAMIC_CLOCK_ADAPTIVE_ICON_XML,
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(mipmapV26Dir, 'ic_launcher_round.xml'),
+        DYNAMIC_CLOCK_ADAPTIVE_ICON_XML,
         'utf8'
       );
 

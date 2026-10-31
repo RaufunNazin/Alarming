@@ -9,6 +9,7 @@ import {
   checkNotificationPermissions,
   schedulePowerNapNotification,
   cancelPowerNapNotification,
+  pruneOrphanedScheduledNotifications,
   MAX_SCHEDULED_STEPS_PER_ALARM,
 } from '../../../core/notifications/alarmNotifier';
 import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
@@ -20,6 +21,7 @@ import {
   findDueAlarmStepAtTime,
   getLocalDateString,
   formatSkippedDateLabel,
+  isCycleDismissedForDate,
 } from '../engine/intervalEngine';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { formatNumberLocalized, TRANSLATIONS } from '../../../core/i18n/translations';
@@ -49,6 +51,8 @@ interface AlarmState {
   toggleSkipNextOccurrence: (id: string) => Promise<void>;
   dismissUpcomingToday: (id: string) => Promise<void>;
   toggleCategoryAlarms: (category: string, enable: boolean) => Promise<void>;
+  clearCategoryFromAlarms: (category: string) => Promise<void>;
+  retainOnlyCategoriesOnAlarms: (allowedCategories: string[]) => Promise<void>;
   toggleAlarm: (id: string) => Promise<void>;
   dismissAllRemainingForToday: (alarmId: string) => Promise<void>;
   dismissSingleAlarm: (alarmId: string) => Promise<void>;
@@ -62,6 +66,7 @@ interface AlarmState {
     totalSteps?: number;
     timeString?: string;
     cycleDateStr?: string;
+    isSnooze?: boolean;
   }) => void;
   showToast: (message: string, actionLabel?: string, onAction?: () => void) => void;
   hideToast: () => void;
@@ -87,7 +92,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       const notifIds = await scheduleAlarmsForAlarmItem(alarm);
       const currentAlarms = get().alarms;
       const idx = currentAlarms.findIndex((a) => a.id === alarm.id);
-      if (idx === -1 || !currentAlarms[idx].isEnabled) {
+      if (
+        idx === -1 ||
+        !currentAlarms[idx].isEnabled ||
+        currentAlarms[idx].enabledAt !== alarm.enabledAt ||
+        currentAlarms[idx].pausedUntil !== alarm.pausedUntil
+      ) {
         return;
       }
       const nextAlarms = [...currentAlarms];
@@ -131,14 +141,51 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     initialize: async () => {
       if (get().isInitialized) return;
-      const [alarms, loveNoteGreeting, lastSelectedType, activePowerNap] = await Promise.all([
+      const [rawAlarms, loveNoteGreeting, lastSelectedType, activePowerNap] = await Promise.all([
         AlarmStorage.getAlarms(),
         AlarmStorage.getLoveNoteGreeting(),
         AlarmStorage.getLastSelectedAlarmType(),
         AlarmStorage.getActivePowerNap(),
       ]);
 
-      const nowMs = Date.now();
+      const now = new Date();
+      const nowMs = now.getTime();
+      const todayStr = getLocalDateString(now);
+
+      let storageNeedsCleanup = false;
+      const alarms: AlarmItem[] = (Array.isArray(rawAlarms) ? rawAlarms : [])
+        .filter(
+          (a): a is AlarmItem =>
+            Boolean(a && typeof a === 'object' && typeof a.id === 'string')
+        )
+        .map((alarm) => {
+          const expiredPause = Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs);
+          const expiredSkip = Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr);
+          const invalidStartHour = !Number.isFinite(alarm.startHour);
+          const invalidStartMinute = !Number.isFinite(alarm.startMinute);
+
+          if (expiredPause || expiredSkip || invalidStartHour || invalidStartMinute) {
+            storageNeedsCleanup = true;
+            return {
+              ...alarm,
+              startHour: invalidStartHour ? 7 : alarm.startHour,
+              startMinute: invalidStartMinute ? 0 : alarm.startMinute,
+              repeatDays: Array.isArray(alarm.repeatDays) ? alarm.repeatDays : [],
+              ...(expiredPause ? { pausedUntil: undefined } : {}),
+              ...(expiredSkip ? { skipNextDate: undefined } : {}),
+            };
+          }
+          if (!Array.isArray(alarm.repeatDays)) {
+            storageNeedsCleanup = true;
+            return { ...alarm, repeatDays: [] };
+          }
+          return alarm;
+        });
+
+      if (storageNeedsCleanup) {
+        void AlarmStorage.saveAlarms(alarms);
+      }
+
       const validPowerNap =
         activePowerNap && activePowerNap.endsAt > nowMs - 2 * 60 * 1000
           ? activePowerNap
@@ -156,12 +203,52 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         isInitialized: true,
       });
 
-      // Synchronize active alarms in the background
-      void Promise.all(
-        alarms
-          .filter((a) => a.isEnabled)
-          .map((alarm) => syncAlarmNotificationsInBackground(alarm))
-      );
+      // Synchronize active alarms sequentially in the background and persist once at the end
+      const activeAlarmsSnapshot = alarms.filter((a) => a.isEnabled);
+      void (async () => {
+        if (activeAlarmsSnapshot.length > 0) {
+          const validResults: { id: string; enabledAt: number | undefined; notifIds: string[] }[] =
+            [];
+          for (const alarm of activeAlarmsSnapshot) {
+            const current = get().alarms.find((a) => a.id === alarm.id);
+            if (
+              !current ||
+              !current.isEnabled ||
+              current.enabledAt !== alarm.enabledAt ||
+              current.pausedUntil !== alarm.pausedUntil
+            ) {
+              continue;
+            }
+            try {
+              const notifIds = await scheduleAlarmsForAlarmItem(alarm);
+              validResults.push({ id: alarm.id, enabledAt: alarm.enabledAt, notifIds });
+            } catch (e) {
+              console.warn('Background alarm notification sync failed:', e);
+            }
+          }
+          if (validResults.length > 0) {
+            const currentAlarms = get().alarms;
+            let changed = false;
+            const nextAlarms = currentAlarms.map((item) => {
+              const match = validResults.find((r) => r.id === item.id);
+              if (match && item.isEnabled && item.enabledAt === match.enabledAt) {
+                changed = true;
+                return { ...item, notificationIds: match.notifIds };
+              }
+              return item;
+            });
+
+            if (changed) {
+              set({ alarms: nextAlarms });
+              await AlarmStorage.saveAlarms(nextAlarms);
+            }
+          }
+        }
+        await pruneOrphanedScheduledNotifications(
+          get().alarms,
+          Boolean(get().activePowerNap)
+        );
+      })();
     },
 
     addAlarm: async (alarmData) => {
@@ -197,8 +284,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         void syncAlarmNotificationsInBackground(newAlarm);
         void checkNotificationPermissions().then((perm) => {
           if (!perm.granted && !perm.canAskAgain) {
+            const lang = useSettingsStore.getState().language;
             set({
-              toastMessage: 'Note: Notifications disabled. Enable in settings to hear alarms.',
+              toastMessage: TRANSLATIONS[lang].notificationsBlockedWarn,
             });
           }
         });
@@ -298,8 +386,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         (updates.isEscalating !== undefined && updates.isEscalating !== existing.isEscalating) ||
         (updates.repeatDays !== undefined &&
           JSON.stringify(updates.repeatDays) !== JSON.stringify(existing.repeatDays || [])) ||
-        (updates.customSteps !== undefined &&
-          JSON.stringify(updates.customSteps) !== JSON.stringify(existing.customSteps || [])) ||
+        ('customSteps' in updates &&
+          JSON.stringify(updates.customSteps || []) !==
+            JSON.stringify(existing.customSteps || [])) ||
         (updates.type !== undefined && updates.type !== existing.type);
 
       const newlyEnabled = updates.isEnabled === true && !existing.isEnabled;
@@ -332,6 +421,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
             : scheduleChanged
               ? undefined
               : existing.snoozedUntil,
+        snoozedStepIndex:
+          'snoozedStepIndex' in updates
+            ? updates.snoozedStepIndex
+            : scheduleChanged || ('snoozedUntil' in updates && !updates.snoozedUntil)
+              ? undefined
+              : existing.snoozedStepIndex,
       };
 
       const showToasts = useSettingsStore.getState().showToastBanners;
@@ -357,7 +452,8 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
           scheduleChanged ||
           newlyEnabled ||
           updates.notificationIds === undefined ||
-          updates.skipNextDate !== existing.skipNextDate
+          updates.skipNextDate !== existing.skipNextDate ||
+          updatedAlarm.pausedUntil !== existing.pausedUntil
         ) {
           void syncAlarmNotificationsInBackground(updatedAlarm);
         }
@@ -481,6 +577,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         lastDismissedDate: undefined,
         skipNextDate: undefined,
         snoozedUntil: undefined,
+        snoozedStepIndex: undefined,
         notificationIds: [],
         repeatDays: [...(target.repeatDays || [])],
         customSteps: target.customSteps ? target.customSteps.map((s) => ({ ...s })) : undefined,
@@ -561,6 +658,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         dismissedForToday: true,
         lastDismissedDate: cycleDateStr,
         snoozedUntil: undefined,
+        snoozedStepIndex: undefined,
         notificationIds: [],
       };
 
@@ -585,7 +683,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
     toggleCategoryAlarms: async (category, enable) => {
       const currentAlarms = get().alarms;
-      const matchingAlarms: AlarmItem[] = [];
+      const syncTargets: AlarmItem[] = [];
       const nowMs = Date.now();
       const pauseUntilMs = nowMs + 24 * 60 * 60 * 1000;
 
@@ -602,14 +700,23 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
                 enabledAt: nowMs,
                 dismissedForToday: false,
                 snoozedUntil: undefined,
+                snoozedStepIndex: undefined,
+                notificationIds: [],
               }
             : {
                 ...alarm,
                 pausedUntil: pauseUntilMs,
+                enabledAt: nowMs,
                 dismissedForToday: false,
                 snoozedUntil: undefined,
+                snoozedStepIndex: undefined,
+                notificationIds: [],
               };
-          matchingAlarms.push(updated);
+          // Preserve previous notificationIds on the sync snapshot so they are cancelled cleanly
+          syncTargets.push({
+            ...updated,
+            notificationIds: alarm.notificationIds,
+          });
           return updated;
         }
         return alarm;
@@ -642,13 +749,97 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
       void AlarmStorage.saveAlarms(updatedAlarms);
 
-      for (const item of matchingAlarms) {
-        if (item.isEnabled) {
-          void syncAlarmNotificationsInBackground(item);
-        } else {
-          void cancelAllScheduledNotificationsForAlarm(item);
-        }
+      if (syncTargets.length > 0) {
+        void (async () => {
+          const validResults: {
+            id: string;
+            enabledAt: number | undefined;
+            pausedUntil: number | undefined;
+            notifIds: string[];
+          }[] = [];
+
+          for (const item of syncTargets) {
+            const current = get().alarms.find((a) => a.id === item.id);
+            if (
+              !current ||
+              current.isEnabled !== item.isEnabled ||
+              current.enabledAt !== item.enabledAt ||
+              current.pausedUntil !== item.pausedUntil
+            ) {
+              continue;
+            }
+            try {
+              if (item.isEnabled) {
+                const notifIds = await scheduleAlarmsForAlarmItem(item);
+                validResults.push({
+                  id: item.id,
+                  enabledAt: item.enabledAt,
+                  pausedUntil: item.pausedUntil,
+                  notifIds,
+                });
+              } else {
+                await cancelAllScheduledNotificationsForAlarm(item);
+              }
+            } catch (e) {
+              console.warn('Category alarm notification sync failed:', e);
+            }
+          }
+
+          if (validResults.length === 0) return;
+
+          const latestAlarms = get().alarms;
+          let changed = false;
+          const nextAlarms = latestAlarms.map((alarm) => {
+            const match = validResults.find((r) => r.id === alarm.id);
+            if (
+              match &&
+              alarm.isEnabled &&
+              alarm.enabledAt === match.enabledAt &&
+              alarm.pausedUntil === match.pausedUntil
+            ) {
+              changed = true;
+              return { ...alarm, notificationIds: match.notifIds };
+            }
+            return alarm;
+          });
+
+          if (changed) {
+            set({ alarms: nextAlarms });
+            await AlarmStorage.saveAlarms(nextAlarms);
+          }
+        })();
       }
+    },
+
+    clearCategoryFromAlarms: async (category) => {
+      const currentAlarms = get().alarms;
+      let changed = false;
+      const updatedAlarms = currentAlarms.map((alarm) => {
+        if (alarm.category === category) {
+          changed = true;
+          return { ...alarm, category: undefined };
+        }
+        return alarm;
+      });
+      if (!changed) return;
+      set({ alarms: updatedAlarms });
+      await AlarmStorage.saveAlarms(updatedAlarms);
+    },
+
+    retainOnlyCategoriesOnAlarms: async (allowedCategories) => {
+      const allowedSet = new Set(allowedCategories);
+      const currentAlarms = get().alarms;
+      let changed = false;
+      const updatedAlarms = currentAlarms.map((alarm) => {
+        if (alarm.category && !allowedSet.has(alarm.category)) {
+          changed = true;
+          return { ...alarm, category: undefined };
+        }
+        return alarm;
+      });
+      if (!changed) return;
+      set({ alarms: updatedAlarms });
+      await AlarmStorage.saveAlarms(updatedAlarms);
     },
 
     toggleAlarm: async (id) => {
@@ -667,6 +858,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         enabledAt: willEnable ? Date.now() : alarm.enabledAt,
         dismissedForToday: false,
         snoozedUntil: undefined,
+        snoozedStepIndex: undefined,
         notificationIds: willEnable ? alarm.notificationIds : [],
       };
 
@@ -694,8 +886,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         void syncAlarmNotificationsInBackground(updatedAlarm);
         void checkNotificationPermissions().then((perm) => {
           if (!perm.granted && !perm.canAskAgain) {
+            const lang = useSettingsStore.getState().language;
             set({
-              toastMessage: 'Note: Notifications disabled. Enable in settings to hear alarms.',
+              toastMessage: TRANSLATIONS[lang].notificationsBlockedWarn,
             });
           }
         });
@@ -731,6 +924,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         lastDismissedDate: cycleDateStr,
         notificationIds: [],
         snoozedUntil: undefined,
+        snoozedStepIndex: undefined,
       };
 
       const updatedAlarms = [...currentAlarms];
@@ -795,6 +989,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         const updatedAlarm: AlarmItem = {
           ...alarm,
           snoozedUntil: undefined,
+          snoozedStepIndex: undefined,
         };
         const updatedAlarms = [...currentAlarms];
         updatedAlarms[index] = updatedAlarm;
@@ -812,6 +1007,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         ...alarm,
         isEnabled: isOneOff ? false : alarm.isEnabled,
         snoozedUntil: undefined,
+        snoozedStepIndex: undefined,
         notificationIds: [],
       };
 
@@ -862,6 +1058,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         return;
       }
 
+      const active = get().activeRinging;
       const currentAlarms = get().alarms;
       const index = currentAlarms.findIndex((a) => a.id === alarmId);
       if (index === -1) {
@@ -870,11 +1067,24 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       }
 
       const alarm = currentAlarms[index];
+      const steps = getAlarmSteps(alarm);
+      const currentStepIdx =
+        active?.alarm.id === alarmId && typeof active.currentStepIndex === 'number'
+          ? active.currentStepIndex
+          : (alarm.snoozedStepIndex ?? 0);
+
       const snoozedUntil = Date.now() + resolvedMinutes * 60 * 1000;
+      const snoozeTargetDate = new Date(snoozedUntil);
+      const collidingStep = findDueAlarmStepAtTime(
+        { ...alarm, snoozedUntil: undefined, snoozedStepIndex: undefined },
+        snoozeTargetDate
+      );
+      const resolvedSnoozedStepIndex = collidingStep ? collidingStep.stepIndex : currentStepIdx;
 
       const updatedAlarm: AlarmItem = {
         ...alarm,
         snoozedUntil,
+        snoozedStepIndex: resolvedSnoozedStepIndex,
       };
 
       const updatedAlarms = [...currentAlarms];
@@ -894,18 +1104,26 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       void AlarmStorage.saveAlarms(updatedAlarms);
       void dismissPresentedNotificationsForAlarm(alarmId);
 
-      const snoozeNotifId = await scheduleSnoozeNotification(alarm, resolvedMinutes);
-      if (snoozeNotifId) {
-        const latestAlarms = get().alarms;
-        const latestIdx = latestAlarms.findIndex((a) => a.id === alarmId);
-        if (latestIdx !== -1) {
-          const nextAlarms = [...latestAlarms];
-          nextAlarms[latestIdx] = {
-            ...nextAlarms[latestIdx],
-            notificationIds: [...(nextAlarms[latestIdx].notificationIds || []), snoozeNotifId],
-          };
-          set({ alarms: nextAlarms });
-          void AlarmStorage.saveAlarms(nextAlarms);
+      // Avoid scheduling a duplicate OS notification if snooze lands on the exact minute of an already-scheduled step
+      if (!collidingStep) {
+        const snoozeNotifId = await scheduleSnoozeNotification(
+          alarm,
+          resolvedMinutes,
+          resolvedSnoozedStepIndex,
+          steps.length
+        );
+        if (snoozeNotifId) {
+          const latestAlarms = get().alarms;
+          const latestIdx = latestAlarms.findIndex((a) => a.id === alarmId);
+          if (latestIdx !== -1) {
+            const nextAlarms = [...latestAlarms];
+            nextAlarms[latestIdx] = {
+              ...nextAlarms[latestIdx],
+              notificationIds: [...(nextAlarms[latestIdx].notificationIds || []), snoozeNotifId],
+            };
+            set({ alarms: nextAlarms });
+            void AlarmStorage.saveAlarms(nextAlarms);
+          }
         }
       }
     },
@@ -919,7 +1137,14 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       set({ activeRinging: ringing });
     },
 
-    triggerFromNotification: ({ alarmId, stepIndex, totalSteps, timeString, cycleDateStr }) => {
+    triggerFromNotification: ({
+      alarmId,
+      stepIndex,
+      totalSteps,
+      timeString,
+      cycleDateStr,
+      isSnooze,
+    }) => {
       if (alarmId === 'power_nap') {
         const now = new Date();
         const lang = useSettingsStore.getState().language;
@@ -952,18 +1177,38 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       const currentAlarms = get().alarms;
       const target = currentAlarms.find((a) => a.id === alarmId);
       if (!target || !target.isEnabled) return;
-      if (target.pausedUntil && target.pausedUntil > Date.now()) return;
+      const now = new Date();
+      if (target.pausedUntil && target.pausedUntil > now.getTime()) return;
+      if (!isSnooze && isCycleDismissedForDate(target, now)) return;
 
-      const resolvedStepIndex = typeof stepIndex === 'number' ? stepIndex : 0;
+      const resolvedStepIndex =
+        typeof stepIndex === 'number'
+          ? stepIndex
+          : typeof target.snoozedStepIndex === 'number'
+            ? target.snoozedStepIndex
+            : 0;
       const resolvedTotalSteps =
         typeof totalSteps === 'number' ? totalSteps : getAlarmSteps(target).length;
-      const resolvedCycleDate = cycleDateStr || getLocalDateString(new Date());
+      const resolvedCycleDate = cycleDateStr || getLocalDateString(now);
       const dedupKey = buildStepDedupKey(alarmId, resolvedStepIndex, resolvedCycleDate);
+      if (!isSnooze && triggeredMinutesSet.has(dedupKey) && !get().activeRinging) {
+        return;
+      }
       triggeredMinutesSet.add(dedupKey);
 
+      const cleanedTarget: AlarmItem =
+        target.snoozedUntil || target.snoozedStepIndex !== undefined
+          ? { ...target, snoozedUntil: undefined, snoozedStepIndex: undefined }
+          : target;
+      const updatedAlarms =
+        cleanedTarget !== target
+          ? currentAlarms.map((a) => (a.id === alarmId ? cleanedTarget : a))
+          : currentAlarms;
+
       set({
+        ...(updatedAlarms !== currentAlarms ? { alarms: updatedAlarms } : {}),
         activeRinging: {
-          alarm: target,
+          alarm: cleanedTarget,
           currentStepIndex: resolvedStepIndex,
           totalSteps: resolvedTotalSteps,
           currentTimeString:
@@ -972,6 +1217,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
               : formatTime12h(target.startHour, target.startMinute),
         },
       });
+      if (updatedAlarms !== currentAlarms) {
+        void AlarmStorage.saveAlarms(updatedAlarms);
+      }
     },
 
     checkAlarmTriggerTick: () => {
@@ -1016,15 +1264,41 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         if (alarm.snoozedUntil && nowMs >= alarm.snoozedUntil) {
           const timeStr = formatTime12h(currentHour, currentMinute);
           const steps = getAlarmSteps(alarm);
-          const updated = currentAlarms.map((a) =>
-            a.id === alarm.id ? { ...a, snoozedUntil: undefined } : a
+          const dueStepAtSameMinute = findDueAlarmStepAtTime(
+            { ...alarm, snoozedUntil: undefined, snoozedStepIndex: undefined },
+            now
           );
+          const restoredStepIndex = dueStepAtSameMinute
+            ? dueStepAtSameMinute.stepIndex
+            : typeof alarm.snoozedStepIndex === 'number'
+              ? alarm.snoozedStepIndex
+              : 0;
+
+          if (dueStepAtSameMinute) {
+            triggeredMinutesSet.add(
+              buildStepDedupKey(
+                alarm.id,
+                dueStepAtSameMinute.stepIndex,
+                dueStepAtSameMinute.cycleDateStr
+              )
+            );
+          }
+          triggeredMinutesSet.add(
+            buildStepDedupKey(alarm.id, restoredStepIndex, getLocalDateString(now))
+          );
+
+          const cleanedAlarm: AlarmItem = {
+            ...alarm,
+            snoozedUntil: undefined,
+            snoozedStepIndex: undefined,
+          };
+          const updated = currentAlarms.map((a) => (a.id === alarm.id ? cleanedAlarm : a));
           set({
             alarms: updated,
             activeRinging: {
-              alarm: { ...alarm, snoozedUntil: undefined },
+              alarm: cleanedAlarm,
               currentTimeString: timeStr,
-              currentStepIndex: 0,
+              currentStepIndex: restoredStepIndex,
               totalSteps: steps.length,
             },
           });
@@ -1069,21 +1343,29 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
       let cleanedAlarms = currentAlarms;
       if (hasExpiredSkipOrPause) {
+        const unpausedAlarmsToResync: AlarmItem[] = [];
         cleanedAlarms = currentAlarms.map((alarm) => {
           const clearSkip = Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr);
           const clearPause = Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs);
           if (clearSkip || clearPause) {
-            return {
+            const nextAlarm: AlarmItem = {
               ...alarm,
               ...(clearSkip ? { skipNextDate: undefined } : {}),
               ...(clearPause ? { pausedUntil: undefined } : {}),
             };
+            if (nextAlarm.isEnabled) {
+              unpausedAlarmsToResync.push(nextAlarm);
+            }
+            return nextAlarm;
           }
           return alarm;
         });
         lastCheckedAlarmsRef = cleanedAlarms;
         set({ alarms: cleanedAlarms });
         void AlarmStorage.saveAlarms(cleanedAlarms);
+        for (const unpaused of unpausedAlarmsToResync) {
+          void syncAlarmNotificationsInBackground(unpaused);
+        }
       }
 
       for (const alarm of cleanedAlarms) {

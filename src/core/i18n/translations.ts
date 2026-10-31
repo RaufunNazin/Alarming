@@ -195,6 +195,10 @@ export const TRANSLATIONS = {
     toggleToastsTitle: 'Show Confirmation Messages',
     toggleToastsDesc: 'Show a popup message telling you how long until the alarm rings.',
     resetSettingsBtn: 'Restore Defaults',
+    resetSettingsConfirmTitle: 'Restore Default Settings?',
+    resetSettingsConfirmBody:
+      'This will reset your theme, default times, and custom categories back to their original defaults. Your saved alarms will not be deleted.',
+    resetSettingsToast: 'Default settings restored',
     viewSourceCodeBtn: 'View Source Code',
 
     // Settings ? Tooltips (Simple & clear for every option)
@@ -222,6 +226,8 @@ export const TRANSLATIONS = {
       'Show the expandable list of every individual alarm step when editing an alarm.',
     tooltipShowAdvanced:
       'Show gap, alarm count, and direction controls right inside the New Alarm screen.',
+    tooltipKeypadInput:
+      'Show the keypad icon when setting an alarm so you can type the exact hour and minute.',
     tooltipShowPowerNap: 'Show or hide the quick Power Nap button on the home screen.',
     tooltipShowToasts: 'Show a message at the bottom when you save or turn on an alarm.',
 
@@ -496,6 +502,10 @@ export const TRANSLATIONS = {
     toggleToastsTitleShort: 'নিশ্চিতকরণ মেসেজ',
     toggleToastsDesc: 'অ্যালার্ম সেভ বা চালু করলে কতক্ষণ পর বাজবে তার মেসেজ দেখান।',
     resetSettingsBtn: 'ডিফল্ট সেটিংসে ফিরিয়ে নিন',
+    resetSettingsConfirmTitle: 'ডিফল্ট সেটিংসে ফিরিয়ে নেবেন?',
+    resetSettingsConfirmBody:
+      'এতে আপনার থিম, ডিফল্ট সময় এবং কাস্টম ক্যাটাগরিগুলো আগের অবস্থায় ফিরে যাবে। আপনার সেভ করা অ্যালার্মগুলো মুছে যাবে না।',
+    resetSettingsToast: 'ডিফল্ট সেটিংস ফিরিয়ে আনা হয়েছে',
     viewSourceCodeBtn: 'সোর্স কোড দেখুন',
 
     // Settings ? Tooltips
@@ -521,6 +531,8 @@ export const TRANSLATIONS = {
       'অ্যালার্ম এডিট করার সময় ভেতরের সবগুলো অ্যালার্মের তালিকা দেখাবে।',
     tooltipShowAdvanced:
       'নতুন অ্যালার্ম সেট করার স্ক্রিনেই বিরতি ও সংখ্যা পরিবর্তনের অপশন দেখাবে।',
+    tooltipKeypadInput:
+      'অ্যালার্মের সময় সেট করার সময় নাম্বার কিপ্যাড দিয়ে সরাসরি ঘণ্টা ও মিনিট লেখার বাটন দেখাবে।',
     tooltipShowPowerNap: 'হোম স্ক্রিনে পাওয়ার ন্যাপ বাটনটি দেখাবে বা লুকিয়ে রাখবে।',
     tooltipShowToasts: 'অ্যালার্ম চালু বা সেভ করলে নিচে নিশ্চিতকরণ মেসেজ দেখাবে।',
 

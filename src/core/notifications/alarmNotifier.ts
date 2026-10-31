@@ -6,6 +6,8 @@ import {
   formatTime12h,
 } from '../../modules/interval-alarm/engine/intervalEngine';
 import { alarmSoundPlayer } from '../audio/alarmSoundPlayer';
+import { useSettingsStore } from '../settings/settingsStore';
+import { formatNumberLocalized } from '../i18n/translations';
 
 export const ALARM_CHANNEL_ID = 'alarming_interval_alarm_channel_v3';
 export const INTERVAL_CATEGORY_ID = 'ALARMING_INTERVAL_CATEGORY';
@@ -22,7 +24,7 @@ export const ACTION_SNOOZE_SINGLE = 'SNOOZE_SINGLE';
  * Automatically replenished as steps ring or when the app wakes/ticks.
  */
 export const MAX_SCHEDULED_STEPS_PER_ALARM = 24;
-const SCHEDULE_BATCH_CHUNK_SIZE = 8;
+const SCHEDULE_BATCH_CHUNK_SIZE = 4;
 
 // Per-alarm operation token to abort stale in-flight scheduling if an alarm is edited, toggled, or deleted
 const latestScheduleTokenByAlarmId: Record<string, number> = {};
@@ -31,6 +33,27 @@ function nextAlarmScheduleToken(alarmId: string): number {
   const next = (latestScheduleTokenByAlarmId[alarmId] || 0) + 1;
   latestScheduleTokenByAlarmId[alarmId] = next;
   return next;
+}
+
+// Global sequential task queue so bulk operations (e.g. category toggle or app startup sync)
+// never flood Android's BroadcastReceiver.goAsync() threads or Binder IPC buffer concurrently
+let notificationTaskQueue: Promise<void> = Promise.resolve();
+
+function enqueueNotificationTask<T>(task: () => Promise<T>): Promise<T> {
+  const resultPromise = notificationTaskQueue.then(task, task);
+  notificationTaskQueue = resultPromise.then(
+    () => undefined,
+    () => undefined
+  );
+  return resultPromise;
+}
+
+function buildStepNotificationId(alarmId: string, slotIndex: number): string {
+  return `${alarmId}_slot_${slotIndex}`;
+}
+
+function buildSnoozeNotificationId(alarmId: string): string {
+  return `${alarmId}_snooze`;
 }
 
 // On iOS, 'defaultRingtone' invokes the system ringtone/alarm; on Android, channel routes to TYPE_ALARM
@@ -195,8 +218,9 @@ export async function initializeAlarmNotifications(): Promise<void> {
 
 /**
  * Helper to cancel all scheduled OS notifications belonging to a specific alarmId
- * (both known `notificationIds` and any matching scheduled notifications in the OS queue)
- * concurrently via `Promise.all`.
+ * (both known `notificationIds` and deterministic slot identifiers)
+ * without calling `getAllScheduledNotificationsAsync()`, avoiding large Binder IPC
+ * Parcelable transactions on Android during bulk category toggles.
  */
 async function cancelScheduledIdsForAlarmInternal(
   alarmId: string,
@@ -205,15 +229,15 @@ async function cancelScheduledIdsForAlarmInternal(
   if (Platform.OS === 'web') return;
 
   const idsToCancel = new Set<string>(knownNotificationIds || []);
+  idsToCancel.add(buildSnoozeNotificationId(alarmId));
 
-  try {
-    const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
-    for (const req of allScheduled) {
-      if (req.content?.data?.alarmId === alarmId) {
-        idsToCancel.add(req.identifier);
-      }
+  if (alarmId === 'power_nap') {
+    idsToCancel.add(buildStepNotificationId('power_nap', 0));
+  } else {
+    for (let slot = 0; slot < MAX_SCHEDULED_STEPS_PER_ALARM; slot++) {
+      idsToCancel.add(buildStepNotificationId(alarmId, slot));
     }
-  } catch {}
+  }
 
   if (idsToCancel.size === 0) return;
 
@@ -230,7 +254,7 @@ async function cancelScheduledIdsForAlarmInternal(
 
 /**
  * Schedules a rolling window of up to MAX_SCHEDULED_STEPS_PER_ALARM upcoming steps
- * for an enabled AlarmItem in fast parallel chunks.
+ * for an enabled AlarmItem via the serialized notification task queue.
  * Returns the list of scheduled notification IDs.
  */
 export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<string[]> {
@@ -240,52 +264,114 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
 
   const token = nextAlarmScheduleToken(alarm.id);
 
-  // Cancel any previously scheduled notifications for this alarm concurrently
-  await cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds);
-
-  if (!alarm.isEnabled || latestScheduleTokenByAlarmId[alarm.id] !== token) {
-    return [];
-  }
-
-  const upcomingSteps = getUpcomingAlarmStepDates(alarm);
-  const stepsToSchedule = upcomingSteps.slice(0, MAX_SCHEDULED_STEPS_PER_ALARM);
-  const scheduledIds: string[] = [];
-
-  for (let offset = 0; offset < stepsToSchedule.length; offset += SCHEDULE_BATCH_CHUNK_SIZE) {
+  return enqueueNotificationTask(async () => {
     if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
-      // A newer schedule/cancel operation started for this alarm; clean up partial work
-      await Promise.all(
-        scheduledIds.map((id) =>
-          Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
-        )
-      );
       return [];
     }
 
-    const chunk = stepsToSchedule.slice(offset, offset + SCHEDULE_BATCH_CHUNK_SIZE);
-    const chunkResults = await Promise.all(
-      chunk.map(async (step) => {
-        if ( step.date.getTime() <= Date.now() ) {
-          return null;
-        }
+    // Cancel any previously scheduled notifications for this alarm
+    await cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds);
 
-        try {
-          if (alarm.type === 'single') {
+    if (alarm.pausedUntil && alarm.pausedUntil > Date.now()) {
+      await dismissPresentedNotificationsForAlarm(alarm.id);
+    }
+
+    if (!alarm.isEnabled || latestScheduleTokenByAlarmId[alarm.id] !== token) {
+      return [];
+    }
+
+    const upcomingSteps = getUpcomingAlarmStepDates(alarm);
+    const stepsToSchedule = upcomingSteps.slice(0, MAX_SCHEDULED_STEPS_PER_ALARM);
+    const scheduledIds: string[] = [];
+
+    for (let offset = 0; offset < stepsToSchedule.length; offset += SCHEDULE_BATCH_CHUNK_SIZE) {
+      if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
+        // A newer schedule/cancel operation started for this alarm; clean up partial work
+        await Promise.all(
+          scheduledIds.map((id) =>
+            Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+          )
+        );
+        return [];
+      }
+
+      const chunk = stepsToSchedule.slice(offset, offset + SCHEDULE_BATCH_CHUNK_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map(async (step, chunkIdx) => {
+          const slotIndex = offset + chunkIdx;
+          if (step.date.getTime() <= Date.now()) {
+            return null;
+          }
+
+          try {
+            const lang = useSettingsStore.getState().language;
+            const defaultAlarmLabel = lang === 'bn' ? 'অ্যালার্ম' : 'Alarm';
+            const singleBody =
+              lang === 'bn'
+                ? `${formatNumberLocalized(step.timeString, 'bn')} — ঘুম থেকে ওঠার সময় হয়েছে`
+                : `${step.timeString} — Time to rise gently`;
+            const notifIdentifier = buildStepNotificationId(alarm.id, slotIndex);
+
+            if (alarm.type === 'single') {
+              return await Notifications.scheduleNotificationAsync({
+                identifier: notifIdentifier,
+                content: {
+                  title: alarm.label || defaultAlarmLabel,
+                  body: singleBody,
+                  sound: ALARM_NOTIFICATION_SOUND,
+                  categoryIdentifier: SINGLE_CATEGORY_ID,
+                  priority: Notifications.AndroidNotificationPriority.MAX,
+                  sticky: true,
+                  autoDismiss: false,
+                  interruptionLevel: 'critical',
+                  data: {
+                    alarmId: alarm.id,
+                    type: 'single',
+                    stepIndex: 0,
+                    totalSteps: 1,
+                    timeString: step.timeString,
+                    cycleDateStr: step.cycleDateStr,
+                  },
+                },
+                trigger: {
+                  type: Notifications.SchedulableTriggerInputTypes.DATE,
+                  date: step.date,
+                  channelId: ALARM_CHANNEL_ID,
+                  delivery: 'alarmClock',
+                },
+              });
+            }
+
+            const stepTitle =
+              lang === 'bn'
+                ? `${alarm.label || defaultAlarmLabel} • ${formatNumberLocalized(
+                    step.stepIndex + 1,
+                    'bn'
+                  )}/${formatNumberLocalized(step.totalSteps, 'bn')}`
+                : `${alarm.label || defaultAlarmLabel} • ${step.stepIndex + 1} of ${
+                    step.totalSteps
+                  }`;
+            const stepBody =
+              lang === 'bn'
+                ? `${formatNumberLocalized(step.timeString, 'bn')} — বন্ধ করতে ট্যাপ করুন`
+                : `${step.timeString} — Tap to wake or stop`;
+
             return await Notifications.scheduleNotificationAsync({
+              identifier: notifIdentifier,
               content: {
-                title: alarm.label || 'Alarm',
-                body: 'Time to rise gently',
+                title: stepTitle,
+                body: stepBody,
                 sound: ALARM_NOTIFICATION_SOUND,
-                categoryIdentifier: SINGLE_CATEGORY_ID,
+                categoryIdentifier: INTERVAL_CATEGORY_ID,
                 priority: Notifications.AndroidNotificationPriority.MAX,
                 sticky: true,
                 autoDismiss: false,
                 interruptionLevel: 'critical',
                 data: {
                   alarmId: alarm.id,
-                  type: 'single',
-                  stepIndex: 0,
-                  totalSteps: 1,
+                  type: alarm.type,
+                  stepIndex: step.stepIndex,
+                  totalSteps: step.totalSteps,
                   timeString: step.timeString,
                   cycleDateStr: step.cycleDateStr,
                 },
@@ -297,63 +383,32 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
                 delivery: 'alarmClock',
               },
             });
+          } catch (e) {
+            console.warn(`Error scheduling alarm step ${step.stepIndex}:`, e);
+            return null;
           }
+        })
+      );
 
-          const stepTitle = alarm.label
-            ? `${alarm.label} • ${step.stepIndex + 1} of ${step.totalSteps}`
-            : `Alarm • ${step.stepIndex + 1} of ${step.totalSteps}`;
-
-          return await Notifications.scheduleNotificationAsync({
-            content: {
-              title: stepTitle,
-              body: `${step.timeString} — Tap to wake or stop`,
-              sound: ALARM_NOTIFICATION_SOUND,
-              categoryIdentifier: INTERVAL_CATEGORY_ID,
-              priority: Notifications.AndroidNotificationPriority.MAX,
-              sticky: true,
-              autoDismiss: false,
-              interruptionLevel: 'critical',
-              data: {
-                alarmId: alarm.id,
-                type: alarm.type,
-                stepIndex: step.stepIndex,
-                totalSteps: step.totalSteps,
-                timeString: step.timeString,
-                cycleDateStr: step.cycleDateStr,
-              },
-            },
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.DATE,
-              date: step.date,
-              channelId: ALARM_CHANNEL_ID,
-              delivery: 'alarmClock',
-            },
-          });
-        } catch (e) {
-          console.warn(`Error scheduling alarm step ${step.stepIndex}:`, e);
-          return null;
+      for (const id of chunkResults) {
+        if (id) {
+          scheduledIds.push(id);
         }
-      })
-    );
-
-    for (const id of chunkResults) {
-      if (id) {
-        scheduledIds.push(id);
       }
     }
-  }
 
-  // Final check in case alarm was deleted/disabled while the last chunk was awaiting
-  if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
-    await Promise.all(
-      scheduledIds.map((id) =>
-        Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
-      )
-    );
-    return [];
-  }
+    // Final check in case alarm was deleted/disabled while the last chunk was awaiting
+    if (latestScheduleTokenByAlarmId[alarm.id] !== token) {
+      await Promise.all(
+        scheduledIds.map((id) =>
+          Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+        )
+      );
+      return [];
+    }
 
-  return scheduledIds;
+    return scheduledIds;
+  });
 }
 
 /**
@@ -361,42 +416,58 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
  */
 export async function scheduleSnoozeNotification(
   alarm: AlarmItem,
-  minutes: number = 10
+  minutes: number = 10,
+  stepIndex: number = 0,
+  totalSteps: number = 1
 ): Promise<string | null> {
   if (Platform.OS === 'web') return null;
 
-  try {
-    const triggerDate = new Date(Date.now() + minutes * 60 * 1000);
-    const categoryId = alarm.type === 'single' ? SINGLE_CATEGORY_ID : INTERVAL_CATEGORY_ID;
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: `${alarm.label || 'Alarm'} (Snoozed)`,
-        body: 'Time to wake up gently',
-        sound: ALARM_NOTIFICATION_SOUND,
-        categoryIdentifier: categoryId,
-        priority: Notifications.AndroidNotificationPriority.MAX,
-        sticky: true,
-        autoDismiss: false,
-        interruptionLevel: 'critical',
-        data: {
-          alarmId: alarm.id,
-          type: alarm.type,
-          isSnooze: true,
-          timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+  return enqueueNotificationTask(async () => {
+    try {
+      const lang = useSettingsStore.getState().language;
+      const defaultLabel = lang === 'bn' ? 'অ্যালার্ম' : 'Alarm';
+      const snoozedSuffix = lang === 'bn' ? '(স্নুজ)' : '(Snoozed)';
+      const snoozeBody =
+        lang === 'bn' ? 'আবার ঘুম থেকে ওঠার সময় হয়েছে' : 'Time to wake up gently';
+
+      const triggerDate = new Date(Date.now() + minutes * 60 * 1000);
+      const categoryId = alarm.type === 'single' ? SINGLE_CATEGORY_ID : INTERVAL_CATEGORY_ID;
+      const snoozeId = buildSnoozeNotificationId(alarm.id);
+      await Notifications.cancelScheduledNotificationAsync(snoozeId).catch(() => {});
+
+      const id = await Notifications.scheduleNotificationAsync({
+        identifier: snoozeId,
+        content: {
+          title: `${alarm.label || defaultLabel} ${snoozedSuffix}`,
+          body: snoozeBody,
+          sound: ALARM_NOTIFICATION_SOUND,
+          categoryIdentifier: categoryId,
+          priority: Notifications.AndroidNotificationPriority.MAX,
+          sticky: true,
+          autoDismiss: false,
+          interruptionLevel: 'critical',
+          data: {
+            alarmId: alarm.id,
+            type: alarm.type,
+            isSnooze: true,
+            stepIndex,
+            totalSteps,
+            timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+          },
         },
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerDate,
-        channelId: ALARM_CHANNEL_ID,
-        delivery: 'alarmClock',
-      },
-    });
-    return id;
-  } catch (e) {
-    console.warn('Error scheduling snooze notification:', e);
-    return null;
-  }
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
+          channelId: ALARM_CHANNEL_ID,
+          delivery: 'alarmClock',
+        },
+      });
+      return id;
+    } catch (e) {
+      console.warn('Error scheduling snooze notification:', e);
+      return null;
+    }
+  });
 }
 
 /**
@@ -430,10 +501,12 @@ export async function cancelAllScheduledNotificationsForAlarm(alarm: AlarmItem):
   // Invalidate any in-flight scheduleAlarmsForAlarmItem call for this alarm immediately
   nextAlarmScheduleToken(alarm.id);
 
-  await Promise.all([
-    cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds),
-    dismissPresentedNotificationsForAlarm(alarm.id),
-  ]);
+  await enqueueNotificationTask(async () => {
+    await Promise.all([
+      cancelScheduledIdsForAlarmInternal(alarm.id, alarm.notificationIds),
+      dismissPresentedNotificationsForAlarm(alarm.id),
+    ]);
+  });
 }
 
 /**
@@ -447,40 +520,49 @@ export async function schedulePowerNapNotification(
 
   await cancelPowerNapNotification();
 
-  try {
-    const triggerDate = new Date(endsAt);
-    if (triggerDate.getTime() <= Date.now()) return null;
+  return enqueueNotificationTask(async () => {
+    try {
+      const triggerDate = new Date(endsAt);
+      if (triggerDate.getTime() <= Date.now()) return null;
 
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: label,
-        body: 'Power nap finished — time to wake up!',
-        sound: ALARM_NOTIFICATION_SOUND,
-        categoryIdentifier: SINGLE_CATEGORY_ID,
-        priority: Notifications.AndroidNotificationPriority.MAX,
-        sticky: true,
-        autoDismiss: false,
-        interruptionLevel: 'critical',
-        data: {
-          alarmId: 'power_nap',
-          type: 'single',
-          stepIndex: 0,
-          totalSteps: 1,
-          timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+      const lang = useSettingsStore.getState().language;
+      const napBody =
+        lang === 'bn'
+          ? 'পাওয়ার ন্যাপ শেষ হয়েছে — ওঠার সময় হয়েছে!'
+          : 'Power nap finished — time to wake up!';
+
+      const id = await Notifications.scheduleNotificationAsync({
+        identifier: buildStepNotificationId('power_nap', 0),
+        content: {
+          title: label,
+          body: napBody,
+          sound: ALARM_NOTIFICATION_SOUND,
+          categoryIdentifier: SINGLE_CATEGORY_ID,
+          priority: Notifications.AndroidNotificationPriority.MAX,
+          sticky: true,
+          autoDismiss: false,
+          interruptionLevel: 'critical',
+          data: {
+            alarmId: 'power_nap',
+            type: 'single',
+            stepIndex: 0,
+            totalSteps: 1,
+            timeString: formatTime12h(triggerDate.getHours(), triggerDate.getMinutes()),
+          },
         },
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerDate,
-        channelId: ALARM_CHANNEL_ID,
-        delivery: 'alarmClock',
-      },
-    });
-    return id;
-  } catch (e) {
-    console.warn('Error scheduling power nap notification:', e);
-    return null;
-  }
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
+          channelId: ALARM_CHANNEL_ID,
+          delivery: 'alarmClock',
+        },
+      });
+      return id;
+    } catch (e) {
+      console.warn('Error scheduling power nap notification:', e);
+      return null;
+    }
+  });
 }
 
 /**
@@ -489,8 +571,73 @@ export async function schedulePowerNapNotification(
 export async function cancelPowerNapNotification(notificationId?: string): Promise<void> {
   if (Platform.OS === 'web') return;
 
-  await Promise.all([
-    cancelScheduledIdsForAlarmInternal('power_nap', notificationId ? [notificationId] : undefined),
-    dismissPresentedNotificationsForAlarm('power_nap'),
-  ]);
+  await enqueueNotificationTask(async () => {
+    await Promise.all([
+      cancelScheduledIdsForAlarmInternal(
+        'power_nap',
+        notificationId ? [notificationId] : undefined
+      ),
+      dismissPresentedNotificationsForAlarm('power_nap'),
+    ]);
+  });
+}
+
+/**
+ * Performs a single startup sweep to cancel any orphaned or legacy random-UUID notifications
+ * that do not belong to currently enabled alarms.
+ */
+export async function pruneOrphanedScheduledNotifications(
+  alarms: AlarmItem[],
+  hasActivePowerNap: boolean = false
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  await enqueueNotificationTask(async () => {
+    try {
+      const enabledAlarmMap = new Map<string, Set<string>>();
+      for (const alarm of alarms) {
+        if (!alarm.isEnabled) continue;
+        const allowedIds = new Set<string>(alarm.notificationIds || []);
+        for (let slot = 0; slot < MAX_SCHEDULED_STEPS_PER_ALARM; slot++) {
+          allowedIds.add(buildStepNotificationId(alarm.id, slot));
+        }
+        if (alarm.snoozedUntil && alarm.snoozedUntil > Date.now()) {
+          allowedIds.add(buildSnoozeNotificationId(alarm.id));
+        }
+        enabledAlarmMap.set(alarm.id, allowedIds);
+      }
+
+      const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+      const orphanIds: string[] = [];
+
+      for (const req of allScheduled) {
+        const id = req.identifier;
+        const alarmId = req.content?.data?.alarmId as string | undefined;
+        if (!alarmId) continue;
+
+        if (alarmId === 'power_nap') {
+          if (!hasActivePowerNap) {
+            orphanIds.push(id);
+          }
+          continue;
+        }
+
+        const allowedForAlarm = enabledAlarmMap.get(alarmId);
+        if (!allowedForAlarm || (allowedForAlarm.size > 0 && !allowedForAlarm.has(id))) {
+          orphanIds.push(id);
+        }
+      }
+
+      for (let i = 0; i < orphanIds.length; i += SCHEDULE_BATCH_CHUNK_SIZE) {
+        const chunk = orphanIds.slice(i, i + SCHEDULE_BATCH_CHUNK_SIZE);
+        await Promise.all(
+          chunk.map((notifId) =>
+            Notifications.cancelScheduledNotificationAsync(notifId).catch(() => {})
+          )
+        );
+      }
+    } catch {
+      // Ignore if platform does not support querying all scheduled notifications
+    }
+  });
 }

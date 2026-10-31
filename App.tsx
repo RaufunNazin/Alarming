@@ -14,6 +14,7 @@ import {
   Outfit_700Bold,
 } from '@expo-google-fonts/outfit';
 import * as Notifications from 'expo-notifications';
+import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from './src/core/theme';
 import { useSettingsStore } from './src/core/settings/settingsStore';
@@ -39,6 +40,10 @@ const WEB_INITIAL_METRICS = {
 };
 
 const ActiveScreen = getActiveModule();
+
+if (Platform.OS !== 'web') {
+  void SplashScreen.preventAutoHideAsync().catch(() => {});
+}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -78,6 +83,8 @@ export default function App() {
     const initPromise = initialize();
     void initializeAlarmNotifications();
 
+    const handledResponseKeys = new Set<string>();
+
     const syncPresentedOrDueAlarms = async () => {
       checkAlarmTriggerTick();
       if (Platform.OS === 'web' || useAlarmStore.getState().activeRinging) {
@@ -85,17 +92,37 @@ export default function App() {
       }
       try {
         const presented = await Notifications.getPresentedNotificationsAsync();
+        const storeState = useAlarmStore.getState();
+        const nowMs = Date.now();
+
         for (const notif of presented) {
           const data = notif.request?.content?.data;
           const alarmId = data?.alarmId as string | undefined;
-          if (alarmId) {
-            triggerFromNotification({
-              alarmId,
-              stepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : undefined,
-              totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
-              timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
-              cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
-            });
+          if (!alarmId) continue;
+
+          if (alarmId !== 'power_nap') {
+            const target = storeState.alarms.find((a) => a.id === alarmId);
+            const isSnoozedInFuture = Boolean(
+              target?.snoozedUntil && target.snoozedUntil > nowMs
+            );
+            const isPausedInFuture = Boolean(target?.pausedUntil && target.pausedUntil > nowMs);
+            if (!target || !target.isEnabled || isPausedInFuture || isSnoozedInFuture) {
+              void Notifications.dismissNotificationAsync(notif.request.identifier).catch(
+                () => {}
+              );
+              continue;
+            }
+          }
+
+          triggerFromNotification({
+            alarmId,
+            stepIndex: typeof data?.stepIndex === 'number' ? data.stepIndex : undefined,
+            totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
+            timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
+            cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+            isSnooze: Boolean(data?.isSnooze),
+          });
+          if (useAlarmStore.getState().activeRinging) {
             break;
           }
         }
@@ -117,7 +144,16 @@ export default function App() {
     });
 
     const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+      const notifId = response.notification?.request?.identifier ?? '';
       const actionIdentifier = response.actionIdentifier;
+      const responseKey = `${notifId}_${actionIdentifier}`;
+      if (notifId && handledResponseKeys.has(responseKey)) {
+        return;
+      }
+      if (notifId) {
+        handledResponseKeys.add(responseKey);
+      }
+
       const data = response.notification.request.content.data;
       const alarmId = data?.alarmId as string;
 
@@ -148,6 +184,7 @@ export default function App() {
           totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
           timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
           cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+          isSnooze: Boolean(data?.isSnooze),
         });
       }
     };
@@ -161,6 +198,7 @@ export default function App() {
         Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
           if (lastResponse) {
             handleNotificationResponse(lastResponse);
+            void Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
           }
         });
       });
@@ -177,6 +215,7 @@ export default function App() {
               totalSteps: typeof data?.totalSteps === 'number' ? data.totalSteps : undefined,
               timeString: typeof data?.timeString === 'string' ? data.timeString : undefined,
               cycleDateStr: typeof data?.cycleDateStr === 'string' ? data.cycleDateStr : undefined,
+              isSnooze: Boolean(data?.isSnooze),
             });
           }
         }
@@ -196,6 +235,12 @@ export default function App() {
     triggerFromNotification,
     checkAlarmTriggerTick,
   ]);
+
+  useEffect(() => {
+    if (fontsLoaded && Platform.OS !== 'web') {
+      void SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded]);
 
   // On native, wait for fonts; on web, render immediately with CSS fallback fonts
   if (!fontsLoaded && Platform.OS !== 'web') {
