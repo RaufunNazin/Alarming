@@ -28,7 +28,10 @@ import {
   Volume2,
   Tag,
   Code,
+  RefreshCw,
+  FileText,
 } from 'lucide-react-native';
+import * as Updates from 'expo-updates';
 import { useTheme } from '../../../core/theme';
 import {
   useSettingsStore,
@@ -52,7 +55,7 @@ const PROJECT_GIT_URL = 'https://github.com/RaufunNazin/Alarming';
 const useNativeDriver = Platform.OS !== 'web';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
-  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, formatNum } = useTranslation();
 
   const settings = useSettingsStore();
@@ -68,6 +71,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
   const [alarmTypeModalVisible, setAlarmTypeModalVisible] = useState(false);
   const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
+  const [changelogVisible, setChangelogVisible] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [activeTooltipKey, setActiveTooltipKey] = useState<string | null>(null);
 
@@ -93,6 +98,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
     resetConfirmVisible,
     () => setResetConfirmVisible(false)
   );
+
+  const changelogSheetGesture = useSheetModalGesture(
+    changelogVisible,
+    () => setChangelogVisible(false)
+  );
+
+  const handleCheckForUpdates = async () => {
+    if (isCheckingUpdate) return;
+    safeHaptics.selectionAsync();
+    if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled) {
+      showToast(t.updateDevModeToast);
+      return;
+    }
+    try {
+      setIsCheckingUpdate(true);
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        showToast(t.updateDownloadingToast);
+        await Updates.fetchUpdateAsync();
+        await Updates.reloadAsync();
+      } else {
+        showToast(t.updateLatestToast);
+      }
+    } catch {
+      showToast(t.updateErrorToast);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const clearTooltipTimer = useCallback(() => {
     if (tooltipTimerRef.current) {
@@ -137,6 +171,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
   useEffect(() => {
     if (!visible) {
       dismissTooltip();
+      setNewCategoryInput('');
+      setAlarmTypeModalVisible(false);
+      setResetConfirmVisible(false);
+      setChangelogVisible(false);
     }
     return () => clearTooltipTimer();
   }, [visible, dismissTooltip, clearTooltipTimer]);
@@ -150,6 +188,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
   const handleAddCategory = () => {
     const trimmed = newCategoryInput.trim();
     if (!trimmed) return;
+    const isDuplicate = settings.categories.some(
+      (c) => c.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (isDuplicate) {
+      setNewCategoryInput('');
+      return;
+    }
     safeHaptics.selectionAsync();
     void addCategory(trimmed);
     setNewCategoryInput('');
@@ -265,7 +310,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
       transparent
       animationType="fade"
       onRequestClose={() => {
-        if (resetConfirmVisible) {
+        if (changelogVisible) {
+          setChangelogVisible(false);
+        } else if (resetConfirmVisible) {
           setResetConfirmVisible(false);
         } else if (alarmTypeModalVisible) {
           setAlarmTypeModalVisible(false);
@@ -298,13 +345,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             if (activeTooltipKey) {
               dismissTooltip();
             }
-            onClose();
+            if (changelogVisible) {
+              setChangelogVisible(false);
+            } else if (resetConfirmVisible) {
+              setResetConfirmVisible(false);
+            } else if (alarmTypeModalVisible) {
+              setAlarmTypeModalVisible(false);
+            } else {
+              onClose();
+            }
           }}
         />
 
         <Animated.View
           onLayout={onSheetLayout}
-          {...sheetPanHandlers}
+          {...(alarmTypeModalVisible || resetConfirmVisible || changelogVisible
+            ? {}
+            : sheetPanHandlers)}
           onTouchEnd={() => {
             if (activeTooltipKey && !justPressedHelpRef.current) {
               dismissTooltip();
@@ -314,6 +371,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             styles.sheet,
             shadows.modal,
             {
+              maxWidth: responsive.modalMaxWidth,
+              alignSelf: 'center',
+              paddingHorizontal: responsive.screenPadding,
+              paddingBottom: responsive.modalBottomPadding,
               backgroundColor: sheetBg,
               borderColor: colors.surfaceBorder,
               borderTopLeftRadius: radii.modalOuter,
@@ -341,6 +402,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
+            scrollEnabled={
+              !alarmTypeModalVisible && !resetConfirmVisible && !changelogVisible
+            }
             onScrollBeginDrag={() => {
               if (activeTooltipKey) {
                 dismissTooltip();
@@ -750,39 +814,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               {renderTooltipBox('categories', t.tooltipCategories)}
 
               <View style={styles.categoryWrapRow}>
-                {settings.categories.map((cat) => (
-                  <View
-                    key={cat}
-                    style={[
-                      styles.categoryManageTag,
-                      {
-                        backgroundColor: controlBg,
-                        borderColor: colors.surfaceBorder,
-                        borderRadius: radii.chip,
-                      },
-                    ]}
-                  >
-                    <Tag size={11} color={colors.accent} />
-                    <Text
+                {settings.categories.map((cat) => {
+                  const isMatchingDuplicate =
+                    newCategoryInput.trim().length > 0 &&
+                    cat.toLowerCase() === newCategoryInput.trim().toLowerCase();
+                  return (
+                    <View
+                      key={cat}
                       style={[
-                        styles.categoryManageText,
-                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                        styles.categoryManageTag,
+                        {
+                          backgroundColor: controlBg,
+                          borderColor: isMatchingDuplicate
+                            ? colors.accent
+                            : colors.surfaceBorder,
+                          borderRadius: radii.chip,
+                        },
                       ]}
                     >
-                      {cat}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        safeHaptics.selectionAsync();
-                        void removeCategory(cat);
-                        void clearCategoryFromAlarms(cat);
-                      }}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <X size={13} color={colors.textMuted} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                      <Tag size={11} color={colors.accent} />
+                      <Text
+                        style={[
+                          styles.categoryManageText,
+                          { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                        ]}
+                      >
+                        {cat}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          safeHaptics.selectionAsync();
+                          void removeCategory(cat);
+                          void clearCategoryFromAlarms(cat);
+                        }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <X size={13} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
 
               <View style={styles.addCategoryInputRow}>
@@ -1360,7 +1431,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                         safeHaptics.selectionAsync();
                         void updateSettings({
                           defaultPowerNapMinutes: Math.min(
-                            180,
+                            240,
                             settings.defaultPowerNapMinutes + 5
                           ),
                         });
@@ -1511,6 +1582,81 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               </View>
             </View>
 
+            {/* Check for Updates Button */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              disabled={isCheckingUpdate}
+              onPress={() => {
+                void handleCheckForUpdates();
+              }}
+              style={[
+                styles.sourceCodeBtn,
+                {
+                  marginTop: 18,
+                  backgroundColor: cardBg,
+                  borderColor: colors.surfaceBorder,
+                  borderRadius: radii.cardInner,
+                  opacity: isCheckingUpdate ? 0.65 : 1,
+                },
+              ]}
+            >
+              <RefreshCw size={16} color={colors.primary} />
+              <Text
+                style={[
+                  styles.sourceCodeBtnText,
+                  { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                ]}
+              >
+                {isCheckingUpdate ? t.checkingUpdatesBtn : t.checkForUpdatesBtn}
+              </Text>
+              <View
+                style={[
+                  styles.versionPill,
+                  {
+                    backgroundColor: colors.primaryMuted,
+                    borderColor: colors.primary + '55',
+                    borderRadius: radii.chip,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.versionPillText,
+                    { color: colors.primaryLight, fontFamily: typography.numbersBold },
+                  ]}
+                >
+                  v{formatNum('1.0.0')}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Changelog (v1.0.0) Button */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                safeHaptics.selectionAsync();
+                setChangelogVisible(true);
+              }}
+              style={[
+                styles.sourceCodeBtn,
+                {
+                  backgroundColor: cardBg,
+                  borderColor: colors.surfaceBorder,
+                  borderRadius: radii.cardInner,
+                },
+              ]}
+            >
+              <FileText size={16} color={colors.accent} />
+              <Text
+                style={[
+                  styles.sourceCodeBtnText,
+                  { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                ]}
+              >
+                {t.changelogBtn}
+              </Text>
+            </TouchableOpacity>
+
             {/* Restore Default Settings Button */}
             <TouchableOpacity
               activeOpacity={0.8}
@@ -1521,6 +1667,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               style={[
                 styles.resetBtn,
                 {
+                  marginTop: 10,
                   backgroundColor: cardBg,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.cardInner,
@@ -1592,6 +1739,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               styles.subModalCard,
               shadows.modal,
               {
+                maxWidth: responsive.modalMaxWidth,
+                alignSelf: 'center',
+                paddingHorizontal: responsive.screenPadding,
+                paddingBottom: responsive.modalBottomPadding + 8,
                 backgroundColor: isLight ? colors.cardOnBg : colors.surface,
                 borderColor: colors.surfaceBorder,
                 borderTopLeftRadius: radii.modalOuter,
@@ -1779,6 +1930,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
               styles.subModalCard,
               shadows.modal,
               {
+                maxWidth: responsive.modalMaxWidth,
+                alignSelf: 'center',
+                paddingHorizontal: responsive.screenPadding,
+                paddingBottom: responsive.modalBottomPadding + 8,
                 backgroundColor: isLight ? colors.cardOnBg : colors.surface,
                 borderColor: colors.surfaceBorder,
                 borderTopLeftRadius: radii.modalOuter,
@@ -1871,6 +2026,148 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 </Text>
               </TouchableOpacity>
             </View>
+          </Animated.View>
+        </View>
+      )}
+
+      {/* In-Modal Overlay for Changelog (v1.0.0) */}
+      {changelogVisible && (
+        <View style={[StyleSheet.absoluteFill, styles.subModalBackdrop]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.overlayBackdrop,
+                opacity: changelogSheetGesture.backdropOpacity,
+              },
+            ]}
+          />
+          <Pressable
+            style={styles.backdropDismissArea}
+            onPress={() => setChangelogVisible(false)}
+          />
+          <Animated.View
+            onLayout={changelogSheetGesture.onSheetLayout}
+            {...changelogSheetGesture.sheetPanHandlers}
+            style={[
+              styles.subModalCard,
+              shadows.modal,
+              {
+                maxHeight: '84%',
+                maxWidth: responsive.modalMaxWidth,
+                alignSelf: 'center',
+                paddingHorizontal: responsive.screenPadding,
+                paddingBottom: responsive.modalBottomPadding + 8,
+                backgroundColor: isLight ? colors.cardOnBg : colors.surface,
+                borderColor: colors.surfaceBorder,
+                borderTopLeftRadius: radii.modalOuter,
+                borderTopRightRadius: radii.modalOuter,
+                transform: [{ translateY: changelogSheetGesture.translateY }],
+              },
+            ]}
+          >
+            <View {...changelogSheetGesture.dragHandlePanHandlers} style={styles.dragHandleArea}>
+              <View
+                style={[
+                  styles.dragHandleBar,
+                  {
+                    backgroundColor: colors.surfaceBorder,
+                    borderRadius: radii.handle,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.subModalTitle,
+                  { color: colors.textPrimary, fontFamily: typography.sansBold },
+                ]}
+              >
+                {t.changelogModalTitle}
+              </Text>
+              <Text
+                style={[
+                  styles.subModalDesc,
+                  { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                ]}
+              >
+                {t.changelogModalSub}
+              </Text>
+            </View>
+
+            <ScrollView
+              style={styles.changelogScroll}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
+              {t.changelogSectionsV100.map((sec, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.changelogSectionCard,
+                    {
+                      backgroundColor: colors.surfaceSubtle,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.cardInner,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.changelogSectionTitle,
+                      { color: colors.textPrimary, fontFamily: typography.sansBold },
+                    ]}
+                  >
+                    {sec.title}
+                  </Text>
+                  {sec.items.map((item, i) => (
+                    <View key={i} style={styles.changelogBulletRow}>
+                      <View
+                        style={[
+                          styles.changelogBulletDot,
+                          { backgroundColor: colors.primary },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.changelogBulletText,
+                          { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                        ]}
+                      >
+                        {item}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                safeHaptics.selectionAsync();
+                setChangelogVisible(false);
+              }}
+              style={[
+                styles.confirmActionBtn,
+                {
+                  flex: 0,
+                  marginTop: 10,
+                  backgroundColor: colors.textPrimary,
+                  borderColor: colors.textPrimary,
+                  borderRadius: radii.button,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.confirmActionText,
+                  { color: colors.textOnPrimary, fontFamily: typography.sansBold },
+                ]}
+              >
+                {t.done}
+              </Text>
+            </TouchableOpacity>
           </Animated.View>
         </View>
       )}
@@ -2117,6 +2414,44 @@ const styles = StyleSheet.create({
   },
   sourceCodeBtnText: {
     fontSize: 14,
+  },
+  versionPill: {
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  versionPillText: {
+    fontSize: 11,
+  },
+  changelogScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  changelogSectionCard: {
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+  },
+  changelogSectionTitle: {
+    fontSize: 13.5,
+    marginBottom: 6,
+  },
+  changelogBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 4,
+  },
+  changelogBulletDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    marginTop: 6,
+  },
+  changelogBulletText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   subModalBackdrop: {
     flex: 1,

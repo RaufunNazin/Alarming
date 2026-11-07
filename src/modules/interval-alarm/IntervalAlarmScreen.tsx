@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  StatusBar as RNStatusBar,
   Modal,
   AppState,
   Pressable,
@@ -13,14 +12,19 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Plus, Bell, Zap, Sun, Tag, Power } from 'lucide-react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Plus, Bell, Zap, Sun, Tag, Power, Check } from 'lucide-react-native';
 import { useTheme } from '../../core/theme';
 import { useSettingsStore } from '../../core/settings/settingsStore';
 import { useTranslation } from '../../core/i18n/translations';
 import { useAlarmStore } from './store/alarmStore';
 import { AlarmItem } from './types';
-import { calculateNextOccurrence, formatAlarmTimeDisplay } from './engine/intervalEngine';
+import {
+  calculateNextOccurrence,
+  CategoryPauseMode,
+  formatAlarmTimeDisplay,
+  getCategorySmartPauseInfo,
+  isCurrentActiveCycleDismissed,
+} from './engine/intervalEngine';
 import { GreetingHeader } from './components/GreetingHeader';
 import { AlarmCardItem } from './components/AlarmCardItem';
 import { AlarmCreationModal } from './components/AlarmCreationModal';
@@ -33,8 +37,7 @@ import { useSheetModalGesture } from './components/useSheetModalGesture';
 import { safeHaptics } from '../../core/haptics/safeHaptics';
 
 export const IntervalAlarmScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
-  const { colors, typography, radii, shadows, spacing, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, language, formatNum } = useTranslation();
   const showPowerNapButton = useSettingsStore((s) => s.showPowerNapButton);
   const defaultPowerNapMinutes = useSettingsStore((s) => s.defaultPowerNapMinutes);
@@ -49,7 +52,6 @@ export const IntervalAlarmScreen: React.FC = () => {
   const startPowerNap = useAlarmStore((s) => s.startPowerNap);
   const cancelPowerNap = useAlarmStore((s) => s.cancelPowerNap);
   const updateAlarm = useAlarmStore((s) => s.updateAlarm);
-  const deleteAlarm = useAlarmStore((s) => s.deleteAlarm);
   const softDeleteAlarm = useAlarmStore((s) => s.softDeleteAlarm);
   const duplicateAlarm = useAlarmStore((s) => s.duplicateAlarm);
   const toggleSkipNextOccurrence = useAlarmStore((s) => s.toggleSkipNextOccurrence);
@@ -66,6 +68,7 @@ export const IntervalAlarmScreen: React.FC = () => {
   const [groupToggleConfirm, setGroupToggleConfirm] = useState<{
     category: string;
     enable: boolean;
+    pauseMode: CategoryPauseMode;
   } | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [powerNapRemainingSec, setPowerNapRemainingSec] = useState<number>(0);
@@ -89,7 +92,7 @@ export const IntervalAlarmScreen: React.FC = () => {
       );
     };
 
-    const timer = setInterval(syncClockIfMinuteChanged, 10000);
+    const timer = setInterval(syncClockIfMinuteChanged, 2000);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         syncClockIfMinuteChanged();
@@ -165,12 +168,12 @@ export const IntervalAlarmScreen: React.FC = () => {
 
   const nowMinuteKey = Math.floor(now.getTime() / 60000);
 
-  // Early Dismissal ("I'm Already Awake") candidate: nearest enabled alarm ringing within earlyDismissalWindowMinutes
+  // Early Dismissal ("I'm Already Awake") candidate: nearest enabled alarm in the active view ringing within earlyDismissalWindowMinutes
   const earlyDismissCandidate = useMemo(() => {
     const windowMs = (earlyDismissalWindowMinutes || 15) * 60 * 1000;
     let best: { alarm: AlarmItem; minsLeft: number } | null = null;
 
-    for (const alarm of alarms) {
+    for (const alarm of filteredAlarms) {
       if (!alarm.isEnabled) continue;
       if (alarm.pausedUntil && alarm.pausedUntil > now.getTime()) continue;
       const nextDate = calculateNextOccurrence(alarm, now);
@@ -183,7 +186,7 @@ export const IntervalAlarmScreen: React.FC = () => {
       }
     }
     return best;
-  }, [alarms, now, earlyDismissalWindowMinutes]);
+  }, [filteredAlarms, now, earlyDismissalWindowMinutes]);
 
   const handleOpenAddModal = useCallback(() => {
     safeHaptics.selectionAsync();
@@ -238,19 +241,29 @@ export const IntervalAlarmScreen: React.FC = () => {
     setPowerNapModalVisible(false);
   }, []);
 
-  // Check if selected category has any active (enabled and not 24h-paused) alarms
+  // Check if selected category has any active (enabled and not paused/dismissed) alarms
   const selectedCategoryAlarms = useMemo(() => {
     if (!selectedCategory) return [];
     return alarms.filter((a) => a.category === selectedCategory);
   }, [alarms, selectedCategory]);
 
   const anyEnabledInSelectedCategory = selectedCategoryAlarms.some(
-    (a) => a.isEnabled && !(a.pausedUntil && a.pausedUntil > now.getTime())
+    (a) =>
+      a.isEnabled &&
+      !(a.pausedUntil && a.pausedUntil > now.getTime()) &&
+      !isCurrentActiveCycleDismissed(a, now)
   );
 
-  // Status bar inset calculation for Android & iOS
-  const topInset = Math.max(insets.top, RNStatusBar.currentHeight ?? 0, 20);
-  const bottomInset = Math.max(insets.bottom, 16);
+  const selectedCategorySmartPause = useMemo(() => {
+    if (!selectedCategory) return null;
+    return getCategorySmartPauseInfo(alarms, selectedCategory, now);
+  }, [alarms, selectedCategory, now]);
+
+  // Status bar & navigation bar inset calculation for Android (3-button & gesture) & iOS
+  const topInset = responsive.topInset;
+  const bottomInset = responsive.bottomNavInset;
+  const fabSize = responsive.fabSize;
+  const fabRadius = Math.round(fabSize * 0.225);
 
   return (
     <View style={styles.rootContainer}>
@@ -274,7 +287,7 @@ export const IntervalAlarmScreen: React.FC = () => {
         {/* Native Alarms Header with Safety Status & Settings Icons */}
         <GreetingHeader onOpenSettings={handleOpenSettings} />
 
-        {/* Category Filter Slider + Under-Slider 24h Category Toggle */}
+        {/* Category Filter Slider + Under-Slider Category Toggle */}
         {alarms.length > 0 && allCategories.length > 0 && (
           <View style={styles.categoryBarWrapper}>
             <ScrollView
@@ -282,7 +295,7 @@ export const IntervalAlarmScreen: React.FC = () => {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={[
                 styles.categoryScrollContent,
-                { paddingHorizontal: spacing.lg },
+                { paddingHorizontal: responsive.screenPadding },
               ]}
             >
               <TouchableOpacity
@@ -294,6 +307,8 @@ export const IntervalAlarmScreen: React.FC = () => {
                 style={[
                   styles.categoryChip,
                   {
+                    paddingHorizontal: responsive.s(12),
+                    paddingVertical: responsive.s(5.5),
                     backgroundColor:
                       selectedCategory === null
                         ? colors.accent
@@ -310,6 +325,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                   style={[
                     styles.categoryChipText,
                     {
+                      fontSize: responsive.ms(12),
                       color:
                         selectedCategory === null ? '#FFFFFF' : colors.textSecondary,
                       fontFamily:
@@ -337,6 +353,8 @@ export const IntervalAlarmScreen: React.FC = () => {
                     style={[
                       styles.categoryChip,
                       {
+                        paddingHorizontal: responsive.s(12),
+                        paddingVertical: responsive.s(5.5),
                         backgroundColor: isSelected
                           ? colors.accent
                           : themeMode === 'light'
@@ -348,13 +366,14 @@ export const IntervalAlarmScreen: React.FC = () => {
                     ]}
                   >
                     <Tag
-                      size={11}
+                      size={Math.round(responsive.ms(11))}
                       color={isSelected ? '#FFFFFF' : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.categoryChipText,
                         {
+                          fontSize: responsive.ms(12),
                           color: isSelected ? '#FFFFFF' : colors.textSecondary,
                           fontFamily: isSelected
                             ? typography.sansBold
@@ -370,48 +389,109 @@ export const IntervalAlarmScreen: React.FC = () => {
               })}
             </ScrollView>
 
-            {/* Small "Turn off all alarms for 24 hours" button directly below the category slider */}
+            {/* Full-width category action bar aligned with alarm cards */}
             {selectedCategory && selectedCategoryAlarms.length > 0 && (
-              <View style={[styles.underCategoryRow, { paddingHorizontal: spacing.lg }]}>
+              <View
+                style={[
+                  styles.underCategoryRow,
+                  { paddingHorizontal: responsive.screenPadding },
+                ]}
+              >
                 <TouchableOpacity
-                  activeOpacity={0.8}
+                  activeOpacity={0.82}
                   onPress={() => {
                     safeHaptics.impactAsync(safeHaptics.ImpactFeedbackStyle.Light);
+                    const defaultPauseMode: CategoryPauseMode =
+                      selectedCategorySmartPause?.recommendedMode ?? 'rest_of_today';
                     setGroupToggleConfirm({
                       category: selectedCategory,
                       enable: !anyEnabledInSelectedCategory,
+                      pauseMode: defaultPauseMode,
                     });
                   }}
                   style={[
-                    styles.groupToggleChip,
+                    styles.groupToggleBar,
                     {
+                      paddingHorizontal: responsive.s(13),
+                      paddingVertical: responsive.s(10),
                       backgroundColor: anyEnabledInSelectedCategory
-                        ? 'rgba(245, 158, 11, 0.14)'
+                        ? 'rgba(245, 158, 11, 0.12)'
                         : colors.accentSoft,
                       borderColor: anyEnabledInSelectedCategory
-                        ? 'rgba(245, 158, 11, 0.40)'
+                        ? 'rgba(245, 158, 11, 0.38)'
                         : colors.accent + '55',
-                      borderRadius: radii.chip,
+                      borderRadius: radii.cardInner,
                     },
                   ]}
                 >
-                  <Power
-                    size={12}
-                    color={anyEnabledInSelectedCategory ? '#F59E0B' : colors.accent}
-                  />
-                  <Text
+                  <View style={styles.groupToggleBarLeft}>
+                    <View
+                      style={[
+                        styles.groupToggleIconBox,
+                        {
+                          width: responsive.s(25),
+                          height: responsive.s(25),
+                          backgroundColor: anyEnabledInSelectedCategory
+                            ? 'rgba(245, 158, 11, 0.20)'
+                            : colors.accent + '25',
+                          borderRadius: radii.chip,
+                        },
+                      ]}
+                    >
+                      <Power
+                        size={Math.round(responsive.ms(13))}
+                        color={anyEnabledInSelectedCategory ? '#F59E0B' : colors.accent}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.groupToggleBarTitle,
+                        {
+                          fontSize: responsive.ms(13),
+                          color: anyEnabledInSelectedCategory ? '#F59E0B' : colors.accent,
+                          fontFamily: typography.sansBold,
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {anyEnabledInSelectedCategory
+                        ? selectedCategorySmartPause?.recommendedMode === 'tomorrow'
+                          ? t.groupToggleActionOffTomorrow(selectedCategory)
+                          : t.groupToggleActionOffToday(selectedCategory)
+                        : t.groupToggleActionOn(selectedCategory)}
+                    </Text>
+                  </View>
+
+                  <View
                     style={[
-                      styles.categoryChipText,
+                      styles.groupToggleRightBadge,
                       {
-                        color: anyEnabledInSelectedCategory ? '#F59E0B' : colors.accent,
-                        fontFamily: typography.sansBold,
+                        paddingHorizontal: responsive.s(8),
+                        paddingVertical: responsive.s(3.5),
+                        backgroundColor: anyEnabledInSelectedCategory
+                          ? 'rgba(245, 158, 11, 0.18)'
+                          : colors.accent + '22',
+                        borderRadius: radii.chip,
                       },
                     ]}
                   >
-                    {anyEnabledInSelectedCategory
-                      ? t.groupToggleActionOff(selectedCategory)
-                      : t.groupToggleActionOn(selectedCategory)}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.groupToggleRightBadgeText,
+                        {
+                          fontSize: responsive.ms(11),
+                          color: anyEnabledInSelectedCategory ? '#F59E0B' : colors.accent,
+                          fontFamily: typography.sansBold,
+                        },
+                      ]}
+                    >
+                      {anyEnabledInSelectedCategory
+                        ? selectedCategorySmartPause?.recommendedMode === 'tomorrow'
+                          ? t.groupToggleSubHintTomorrow
+                          : t.groupToggleSubHintToday
+                        : t.groupToggleSubHintResume}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
             )}
@@ -422,6 +502,9 @@ export const IntervalAlarmScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
+            {
+              paddingBottom: bottomInset + fabSize + 36,
+            },
             filteredAlarms.length === 0 && styles.emptyScrollContent,
           ]}
         >
@@ -437,7 +520,9 @@ export const IntervalAlarmScreen: React.FC = () => {
                 styles.earlyDismissCard,
                 shadows.card,
                 {
-                  marginHorizontal: spacing.lg,
+                  marginHorizontal: responsive.screenPadding,
+                  paddingHorizontal: responsive.s(15),
+                  paddingVertical: responsive.s(12),
                   backgroundColor: colors.accentSoft,
                   borderColor: colors.accent + '55',
                   borderRadius: radii.cardOuter,
@@ -448,18 +533,25 @@ export const IntervalAlarmScreen: React.FC = () => {
                 style={[
                   styles.earlyDismissIconCircle,
                   {
+                    width: responsive.s(36),
+                    height: responsive.s(36),
                     backgroundColor: colors.accent + '25',
                     borderRadius: radii.chip,
                   },
                 ]}
               >
-                <Sun size={20} color={colors.accent} />
+                <Sun size={Math.round(responsive.ms(19))} color={colors.accent} />
               </View>
               <View style={styles.earlyDismissTextCol}>
                 <Text
                   style={[
                     styles.earlyDismissTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansBold },
+                    {
+                      fontSize: responsive.ms(13.5),
+                      lineHeight: responsive.ms(18),
+                      color: colors.textPrimary,
+                      fontFamily: typography.sansBold,
+                    },
                   ]}
                 >
                   {t.earlyDismissBannerTitle(
@@ -472,7 +564,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.earlyDismissSub,
-                    { color: colors.accent, fontFamily: typography.sansBold },
+                    {
+                      fontSize: responsive.ms(12),
+                      color: colors.accent,
+                      fontFamily: typography.sansBold,
+                    },
                   ]}
                 >
                   {t.earlyDismissBannerSub}
@@ -501,18 +597,28 @@ export const IntervalAlarmScreen: React.FC = () => {
                 style={[
                   styles.emptyIconCircle,
                   {
+                    width: responsive.s(68),
+                    height: responsive.s(68),
                     backgroundColor: colors.surface,
                     borderColor: colors.surfaceBorder,
                     borderRadius: radii.cardOuter,
                   },
                 ]}
               >
-                <Bell size={36} color={colors.textMuted} strokeWidth={1.8} />
+                <Bell
+                  size={Math.round(responsive.ms(34))}
+                  color={colors.textMuted}
+                  strokeWidth={1.8}
+                />
               </View>
               <Text
                 style={[
                   styles.emptyTitle,
-                  { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(20),
+                    color: colors.textPrimary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.noAlarmsTitle}
@@ -520,7 +626,11 @@ export const IntervalAlarmScreen: React.FC = () => {
               <Text
                 style={[
                   styles.emptySubtitle,
-                  { color: colors.textSecondary, fontFamily: typography.numbersRegular },
+                  {
+                    fontSize: responsive.ms(14),
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersRegular,
+                  },
                 ]}
               >
                 {t.noAlarmsSub}
@@ -534,7 +644,10 @@ export const IntervalAlarmScreen: React.FC = () => {
           style={[
             styles.floatingBottomRow,
             {
-              bottom: bottomInset + 16,
+              left: responsive.screenPadding,
+              right: responsive.screenPadding,
+              bottom: bottomInset + (responsive.isCompact ? 10 : 14),
+              gap: responsive.s(10),
             },
           ]}
           pointerEvents="box-none"
@@ -563,13 +676,16 @@ export const IntervalAlarmScreen: React.FC = () => {
                 styles.powerNapFab,
                 shadows.buttonPrimary,
                 {
+                  height: fabSize,
+                  paddingHorizontal: responsive.s(12),
+                  gap: responsive.s(8),
                   backgroundColor: isPowerNapActive
                     ? colors.primaryMuted
                     : colors.surfaceHero,
                   borderColor: isPowerNapActive
                     ? colors.primary
                     : colors.primary + '55',
-                  borderRadius: radii.squircleToggle,
+                  borderRadius: fabRadius,
                 },
               ]}
               accessibilityLabel={t.powerNapLabel}
@@ -578,6 +694,8 @@ export const IntervalAlarmScreen: React.FC = () => {
                 style={[
                   styles.powerNapIconCircle,
                   {
+                    width: Math.round(fabSize * 0.56),
+                    height: Math.round(fabSize * 0.56),
                     backgroundColor: isPowerNapActive
                       ? colors.primary
                       : colors.primaryMuted,
@@ -586,7 +704,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                 ]}
               >
                 <Zap
-                  size={18}
+                  size={Math.round(responsive.ms(17))}
                   color={isPowerNapActive ? '#FFFFFF' : colors.primary}
                   fill={isPowerNapActive ? '#FFFFFF' : colors.primary}
                 />
@@ -596,6 +714,8 @@ export const IntervalAlarmScreen: React.FC = () => {
                   style={[
                     styles.powerNapMainText,
                     {
+                      fontSize: responsive.ms(14.5),
+                      lineHeight: responsive.ms(18),
                       color: isPowerNapActive ? colors.primaryLight : colors.textPrimary,
                       fontFamily: typography.numbersBold,
                     },
@@ -608,7 +728,12 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.powerNapSubText,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                    {
+                      fontSize: responsive.ms(10),
+                      lineHeight: responsive.ms(12.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.sansRegular,
+                    },
                   ]}
                 >
                   {isPowerNapActive ? t.powerNapTapToCancel : t.powerNapHint}
@@ -624,13 +749,19 @@ export const IntervalAlarmScreen: React.FC = () => {
               styles.fab,
               shadows.buttonPrimary,
               {
+                width: fabSize,
+                height: fabSize,
                 backgroundColor: colors.textPrimary,
-                borderRadius: radii.squircleToggle,
+                borderRadius: fabRadius,
               },
             ]}
             accessibilityLabel="Add new alarm"
           >
-            <Plus size={28} color={colors.textOnPrimary} strokeWidth={2.6} />
+            <Plus
+              size={Math.round(fabSize * 0.46)}
+              color={colors.textOnPrimary}
+              strokeWidth={2.6}
+            />
           </TouchableOpacity>
         </View>
 
@@ -664,6 +795,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                   styles.confirmSheet,
                   shadows.modal,
                   {
+                    maxWidth: responsive.modalMaxWidth,
+                    alignSelf: 'center',
+                    paddingHorizontal: responsive.s(20),
+                    paddingTop: responsive.s(12),
+                    paddingBottom: responsive.modalBottomPadding + 8,
                     backgroundColor: colors.modalSurface,
                     borderColor: colors.surfaceBorder,
                     borderTopLeftRadius: radii.modalOuter,
@@ -685,7 +821,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.confirmTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansBold },
+                    {
+                      fontSize: responsive.ms(18),
+                      color: colors.textPrimary,
+                      fontFamily: typography.sansBold,
+                    },
                   ]}
                 >
                   {t.cancelPowerNapTitle}
@@ -693,7 +833,12 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.confirmBody,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                    {
+                      fontSize: responsive.ms(14),
+                      lineHeight: responsive.ms(20),
+                      color: colors.textSecondary,
+                      fontFamily: typography.sansRegular,
+                    },
                   ]}
                 >
                   {t.cancelPowerNapBody}
@@ -709,6 +854,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                     style={[
                       styles.confirmBtn,
                       {
+                        paddingVertical: responsive.s(13),
                         backgroundColor: colors.surfaceSubtle,
                         borderColor: colors.surfaceBorder,
                         borderRadius: radii.button,
@@ -718,7 +864,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                     <Text
                       style={[
                         styles.confirmBtnText,
-                        { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                        {
+                          fontSize: responsive.ms(14),
+                          color: colors.textPrimary,
+                          fontFamily: typography.sansMedium,
+                        },
                       ]}
                     >
                       {t.keepNapBtn}
@@ -737,6 +887,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                     style={[
                       styles.confirmBtn,
                       {
+                        paddingVertical: responsive.s(13),
                         backgroundColor: colors.danger,
                         borderColor: colors.danger,
                         borderRadius: radii.button,
@@ -746,7 +897,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                     <Text
                       style={[
                         styles.confirmBtnText,
-                        { color: '#FFFFFF', fontFamily: typography.sansBold },
+                        {
+                          fontSize: responsive.ms(14),
+                          color: '#FFFFFF',
+                          fontFamily: typography.sansBold,
+                        },
                       ]}
                     >
                       {t.cancelNapBtn}
@@ -788,6 +943,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                   styles.confirmSheet,
                   shadows.modal,
                   {
+                    maxWidth: responsive.modalMaxWidth,
+                    alignSelf: 'center',
+                    paddingHorizontal: responsive.s(20),
+                    paddingTop: responsive.s(12),
+                    paddingBottom: responsive.modalBottomPadding + 8,
                     backgroundColor: colors.modalSurface,
                     borderColor: colors.surfaceBorder,
                     borderTopLeftRadius: radii.modalOuter,
@@ -809,7 +969,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.confirmTitle,
-                    { color: colors.textPrimary, fontFamily: typography.sansBold },
+                    {
+                      fontSize: responsive.ms(18),
+                      color: colors.textPrimary,
+                      fontFamily: typography.sansBold,
+                    },
                   ]}
                 >
                   {t.groupToggleModalTitle(
@@ -820,16 +984,118 @@ export const IntervalAlarmScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.confirmBody,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                    {
+                      fontSize: responsive.ms(14),
+                      lineHeight: responsive.ms(20),
+                      color: colors.textSecondary,
+                      fontFamily: typography.sansRegular,
+                    },
                   ]}
                 >
                   {t.groupToggleModalBody(
                     groupToggleConfirm.category,
-                    alarms.filter((a) => a.category === groupToggleConfirm.category)
-                      .length,
+                    alarms.filter(
+                      (a) =>
+                        a.category === groupToggleConfirm.category &&
+                        (groupToggleConfirm.enable ? true : a.isEnabled)
+                    ).length,
                     groupToggleConfirm.enable
                   )}
                 </Text>
+
+                {!groupToggleConfirm.enable && (
+                  <View style={styles.pauseModeOptionsGroup}>
+                    {(
+                      [
+                        {
+                          mode: 'rest_of_today' as CategoryPauseMode,
+                          title: t.groupPauseModeTodayTitle,
+                          desc: t.groupPauseModeTodayDesc,
+                        },
+                        {
+                          mode: 'tomorrow' as CategoryPauseMode,
+                          title: t.groupPauseModeTomorrowTitle,
+                          desc: t.groupPauseModeTomorrowDesc,
+                        },
+                      ] as const
+                    ).map((opt) => {
+                      const isSelected = groupToggleConfirm.pauseMode === opt.mode;
+                      return (
+                        <TouchableOpacity
+                          key={opt.mode}
+                          activeOpacity={0.82}
+                          onPress={() => {
+                            safeHaptics.selectionAsync();
+                            setGroupToggleConfirm((prev) =>
+                              prev ? { ...prev, pauseMode: opt.mode } : null
+                            );
+                          }}
+                          style={[
+                            styles.pauseModeCard,
+                            {
+                              paddingHorizontal: responsive.s(13),
+                              paddingVertical: responsive.s(11),
+                              backgroundColor: isSelected
+                                ? 'rgba(245, 158, 11, 0.14)'
+                                : colors.surfaceSubtle,
+                              borderColor: isSelected
+                                ? '#F59E0B'
+                                : colors.surfaceBorder,
+                              borderRadius: radii.cardInner,
+                            },
+                          ]}
+                        >
+                          <View style={styles.pauseModeTextCol}>
+                            <Text
+                              style={[
+                                styles.pauseModeTitle,
+                                {
+                                  fontSize: responsive.ms(13.5),
+                                  color: isSelected ? '#F59E0B' : colors.textPrimary,
+                                  fontFamily: typography.sansBold,
+                                },
+                              ]}
+                            >
+                              {opt.title}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.pauseModeDesc,
+                                {
+                                  fontSize: responsive.ms(12),
+                                  lineHeight: responsive.ms(16),
+                                  color: colors.textSecondary,
+                                  fontFamily: typography.sansRegular,
+                                },
+                              ]}
+                            >
+                              {opt.desc}
+                            </Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.pauseModeCheckCircle,
+                              {
+                                width: responsive.s(21),
+                                height: responsive.s(21),
+                                backgroundColor: isSelected ? '#F59E0B' : 'transparent',
+                                borderColor: isSelected
+                                  ? '#F59E0B'
+                                  : colors.surfaceBorder,
+                                borderRadius: radii.chip,
+                              },
+                            ]}
+                          >
+                            {isSelected && (
+                              <Check size={Math.round(responsive.ms(13))} color="#FFFFFF" />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
 
                 <View style={styles.confirmBtnRow}>
                   <TouchableOpacity
@@ -841,6 +1107,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                     style={[
                       styles.confirmBtn,
                       {
+                        paddingVertical: responsive.s(13),
                         backgroundColor: colors.surfaceSubtle,
                         borderColor: colors.surfaceBorder,
                         borderRadius: radii.button,
@@ -850,7 +1117,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                     <Text
                       style={[
                         styles.confirmBtnText,
-                        { color: colors.textSecondary, fontFamily: typography.sansMedium },
+                        {
+                          fontSize: responsive.ms(14),
+                          color: colors.textSecondary,
+                          fontFamily: typography.sansMedium,
+                        },
                       ]}
                     >
                       {t.cancelBtn}
@@ -863,13 +1134,14 @@ export const IntervalAlarmScreen: React.FC = () => {
                       safeHaptics.notificationAsync(
                         safeHaptics.NotificationFeedbackType.Success
                       );
-                      const { category, enable } = groupToggleConfirm;
+                      const { category, enable, pauseMode } = groupToggleConfirm;
                       setGroupToggleConfirm(null);
-                      void toggleCategoryAlarms(category, enable);
+                      void toggleCategoryAlarms(category, enable, pauseMode);
                     }}
                     style={[
                       styles.confirmBtn,
                       {
+                        paddingVertical: responsive.s(13),
                         backgroundColor: colors.accent,
                         borderColor: colors.accent,
                         borderRadius: radii.button,
@@ -879,7 +1151,11 @@ export const IntervalAlarmScreen: React.FC = () => {
                     <Text
                       style={[
                         styles.confirmBtnText,
-                        { color: '#FFFFFF', fontFamily: typography.sansBold },
+                        {
+                          fontSize: responsive.ms(14),
+                          color: '#FFFFFF',
+                          fontFamily: typography.sansBold,
+                        },
                       ]}
                     >
                       {t.confirmBtn}
@@ -894,6 +1170,7 @@ export const IntervalAlarmScreen: React.FC = () => {
         {/* Alarm Creation Modal */}
         <AlarmCreationModal
           visible={createModalVisible}
+          initialCategory={selectedCategory ?? undefined}
           onClose={handleCloseCreateModal}
           onSave={addAlarm}
         />
@@ -909,7 +1186,7 @@ export const IntervalAlarmScreen: React.FC = () => {
                 void updateAlarm(currentEditingAlarm.id, updatedData);
               }
             }}
-            onDelete={deleteAlarm}
+            onDelete={handleSwipeDelete}
             onDuplicate={handleDuplicate}
             onToggleSkipNext={handleToggleSkipNext}
           />
@@ -932,8 +1209,8 @@ export const IntervalAlarmScreen: React.FC = () => {
 
         {/* Alarm Set Duration / Undo Delete Toast Banner */}
         <AlarmToastBanner
-          bottomOffset={bottomInset + 16 + 60 + 16}
-          horizontalMargin={16}
+          bottomOffset={bottomInset + (responsive.isCompact ? 10 : 14) + fabSize + 14}
+          horizontalMargin={responsive.screenPadding}
         />
       </View>
     </View>
@@ -965,18 +1242,75 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   underCategoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    marginBottom: 2,
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 4,
   },
-  groupToggleChip: {
+  groupToggleBar: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     borderWidth: 1,
+  },
+  groupToggleBarLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  groupToggleIconBox: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupToggleBarTitle: {
+    flex: 1,
+    fontSize: 13,
+    letterSpacing: 0.2,
+  },
+  groupToggleRightBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  groupToggleRightBadgeText: {
+    fontSize: 11,
+    letterSpacing: 0.2,
+  },
+  pauseModeOptionsGroup: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  pauseModeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+  },
+  pauseModeTextCol: {
+    flex: 1,
+    gap: 3,
+  },
+  pauseModeTitle: {
+    fontSize: 13.5,
+  },
+  pauseModeDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  pauseModeCheckCircle: {
+    width: 22,
+    height: 22,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   categoryChipText: {
     fontSize: 12,

@@ -64,7 +64,7 @@ interface SequenceStepRowProps {
 
 const SequenceStepRow = React.memo<SequenceStepRowProps>(
   ({ step, idx, isLastActive, onPressEditTime, onNudgeTime, onToggleEnabled }) => {
-    const { colors, typography, radii } = useTheme();
+    const { colors, typography, radii, responsive } = useTheme();
     const { formatNum, formatTime12h: formatTime12hLocal } = useTranslation();
     const isStepOn = step.isEnabled;
 
@@ -73,6 +73,8 @@ const SequenceStepRow = React.memo<SequenceStepRowProps>(
         style={[
           styles.timingRowCard,
           {
+            paddingVertical: responsive.s(7),
+            paddingHorizontal: responsive.s(9),
             backgroundColor: isStepOn ? colors.cardOnBg : colors.cardOffBg,
             borderColor: isStepOn ? colors.cardOnBorder : colors.cardOffBorder,
             borderRadius: radii.buttonMedium,
@@ -94,6 +96,7 @@ const SequenceStepRow = React.memo<SequenceStepRowProps>(
             style={[
               styles.stepIndexText,
               {
+                fontSize: responsive.ms(11),
                 color: isStepOn ? colors.accent : colors.textMuted,
                 fontFamily: typography.numbersBold,
               },
@@ -114,6 +117,7 @@ const SequenceStepRow = React.memo<SequenceStepRowProps>(
             style={[
               styles.stepTimeText,
               {
+                fontSize: responsive.ms(14.5),
                 color: isStepOn ? colors.textPrimary : colors.textMuted,
                 fontFamily: typography.numbersBold,
               },
@@ -122,7 +126,7 @@ const SequenceStepRow = React.memo<SequenceStepRowProps>(
             {formatTime12hLocal(step.hour, step.minute).full}
           </Text>
           <Edit3
-            size={12}
+            size={Math.round(responsive.ms(12))}
             color={isStepOn ? colors.textSecondary : colors.textMuted}
             strokeWidth={2}
           />
@@ -246,7 +250,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   onDuplicate,
   onToggleSkipNext,
 }) => {
-  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, language, formatTime12h: formatTime12hLocal } = useTranslation();
   const showAlarmSequenceSection = useSettingsStore((s) => s.showAlarmSequenceSection);
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
@@ -290,6 +294,9 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   useEffect(() => {
     if (!visible) {
       initializedAlarmIdRef.current = null;
+      setShowDeleteConfirm(false);
+      setClockModalVisible(false);
+      setEditingStepIndex(null);
       return;
     }
     if (visible && alarm && initializedAlarmIdRef.current !== alarm.id) {
@@ -464,10 +471,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
   const enabledStepCount = steps.filter((s) => s.isEnabled).length;
 
   const toggleDay = (dayIndex: number) => {
+    safeHaptics.selectionAsync();
     if (repeatDays.includes(dayIndex)) {
       setRepeatDays(repeatDays.filter((d) => d !== dayIndex));
     } else {
-      setRepeatDays([...repeatDays, dayIndex].sort());
+      setRepeatDays([...repeatDays, dayIndex].sort((a, b) => a - b));
     }
   };
 
@@ -794,18 +802,28 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
           style={StyleSheet.absoluteFill}
           onPress={() => {
             Keyboard.dismiss();
-            onClose();
+            if (showDeleteConfirm) {
+              setShowDeleteConfirm(false);
+            } else if (clockModalVisible) {
+              setEditingStepIndex(null);
+              setClockModalVisible(false);
+            } else {
+              onClose();
+            }
           }}
           accessibilityLabel="Close edit modal"
         />
 
         <Animated.View
           onLayout={onSheetLayout}
-          {...sheetPanHandlers}
+          {...(clockModalVisible || showDeleteConfirm ? {} : sheetPanHandlers)}
           style={[
             styles.modalContent,
             shadows.modal,
             {
+              height: responsive.isCompact ? '92%' : '88%',
+              maxWidth: responsive.modalMaxWidth,
+              alignSelf: 'center',
               backgroundColor: colors.background,
               borderColor: colors.surfaceBorder,
               borderTopLeftRadius: radii.modalOuter,
@@ -815,7 +833,16 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
           ]}
         >
             {/* Top Drag Handle Zone */}
-            <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
+            <View
+              {...dragHandlePanHandlers}
+              style={[
+                styles.dragHandleZone,
+                {
+                  paddingTop: responsive.s(10),
+                  paddingBottom: responsive.s(12),
+                },
+              ]}
+            >
               <View
                 style={[
                   styles.handleBar,
@@ -835,13 +862,17 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
-              contentContainerStyle={{ paddingBottom: 14, paddingTop: 2 }}
+              scrollEnabled={!clockModalVisible && !showDeleteConfirm}
+              contentContainerStyle={{ paddingBottom: responsive.s(14), paddingTop: 2 }}
             >
               {/* Selected Time Banner with "Edit" Button */}
               <View
                 style={[
                   styles.timeCardBanner,
                   {
+                    marginHorizontal: responsive.screenPadding,
+                    padding: responsive.s(14),
+                    marginBottom: responsive.s(14),
                     backgroundColor: colors.surface,
                     borderColor: colors.surfaceBorder,
                     borderRadius: radii.cardOuter,
@@ -852,7 +883,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   <Text
                     style={[
                       styles.timeBannerValue,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(21),
+                        color: colors.textPrimary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {timeDisplayString}
@@ -860,7 +895,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   <Text
                     style={[
                       styles.timeBannerType,
-                      { color: colors.textSecondary, fontFamily: typography.numbersRegular },
+                      {
+                        fontSize: responsive.ms(12),
+                        color: colors.textSecondary,
+                        fontFamily: typography.numbersRegular,
+                      },
                     ]}
                   >
                     {typeSubtitle}
@@ -877,6 +916,8 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   style={[
                     styles.editTimeBtn,
                     {
+                      paddingVertical: responsive.s(7),
+                      paddingHorizontal: responsive.s(12),
                       backgroundColor: colors.surfaceSubtle,
                       borderColor: colors.surfaceBorder,
                       borderRadius: radii.chip,
@@ -884,11 +925,19 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   ]}
                   accessibilityLabel="Edit alarm time"
                 >
-                  <Edit3 size={14} color={colors.accent} strokeWidth={2.4} />
+                  <Edit3
+                    size={Math.round(responsive.ms(14))}
+                    color={colors.accent}
+                    strokeWidth={2.4}
+                  />
                   <Text
                     style={[
                       styles.editTimeBtnText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(12.5),
+                        color: colors.textPrimary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {language === 'bn' ? 'এডিট' : 'Edit'}
@@ -897,11 +946,23 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               </View>
 
               {/* Alarm Label / Name */}
-              <View style={styles.sectionContainer}>
+              <View
+                style={[
+                  styles.sectionContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginBottom: responsive.s(14),
+                  },
+                ]}
+              >
                 <Text
                   style={[
                     styles.sectionHeading,
-                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(10.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.alarmLabelPlaceholder.toUpperCase()}
@@ -914,6 +975,9 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   style={[
                     styles.textInput,
                     {
+                      paddingHorizontal: responsive.s(13),
+                      paddingVertical: responsive.s(10.5),
+                      fontSize: responsive.ms(13.5),
                       backgroundColor: colors.surface,
                       borderColor: colors.surfaceBorder,
                       color: colors.textPrimary,
@@ -926,11 +990,23 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
               {/* Category Tag Selector */}
               {categories.length > 0 && (
-                <View style={styles.sectionContainer}>
+                <View
+                  style={[
+                    styles.sectionContainer,
+                    {
+                      marginHorizontal: responsive.screenPadding,
+                      marginBottom: responsive.s(14),
+                    },
+                  ]}
+                >
                   <Text
                     style={[
                       styles.sectionHeading,
-                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(10.5),
+                        color: colors.textSecondary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.categoryLabel.toUpperCase()}
@@ -949,6 +1025,8 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       style={[
                         styles.categoryChip,
                         {
+                          paddingHorizontal: responsive.s(11),
+                          paddingVertical: responsive.s(6),
                           backgroundColor: !category ? colors.accent : colors.surface,
                           borderColor: !category ? colors.accent : colors.surfaceBorder,
                           borderRadius: radii.pill,
@@ -959,6 +1037,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                         style={[
                           styles.categoryChipText,
                           {
+                            fontSize: responsive.ms(11.5),
                             color: !category ? '#FFFFFF' : colors.textSecondary,
                             fontFamily: !category
                               ? typography.sansBold
@@ -983,6 +1062,8 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                           style={[
                             styles.categoryChip,
                             {
+                              paddingHorizontal: responsive.s(11),
+                              paddingVertical: responsive.s(6),
                               backgroundColor: isSelected
                                 ? colors.accent
                                 : colors.surface,
@@ -994,13 +1075,14 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                           ]}
                         >
                           <Tag
-                            size={11}
+                            size={Math.round(responsive.ms(10.5))}
                             color={isSelected ? '#FFFFFF' : colors.textSecondary}
                           />
                           <Text
                             style={[
                               styles.categoryChipText,
                               {
+                                fontSize: responsive.ms(11.5),
                                 color: isSelected ? '#FFFFFF' : colors.textSecondary,
                                 fontFamily: isSelected
                                   ? typography.sansBold
@@ -1018,12 +1100,24 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               )}
 
               {/* Repeat Days */}
-              <View style={styles.sectionContainer}>
+              <View
+                style={[
+                  styles.sectionContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginBottom: responsive.s(14),
+                  },
+                ]}
+              >
                 <View style={styles.repeatHeaderRow}>
                   <Text
                     style={[
                       styles.sectionHeading,
-                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(10.5),
+                        color: colors.textSecondary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.repeatLabel.toUpperCase()}
@@ -1031,14 +1125,18 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   <Text
                     style={[
                       styles.repeatDaysSummary,
-                      { color: colors.textMuted, fontFamily: typography.numbersRegular },
+                      {
+                        fontSize: responsive.ms(11.5),
+                        color: colors.textMuted,
+                        fontFamily: typography.numbersRegular,
+                      },
                     ]}
                   >
                     {formatRepeatDays(repeatDays)}
                   </Text>
                 </View>
 
-                <View style={styles.daysRow}>
+                <View style={[styles.daysRow, { gap: responsive.s(5) }]}>
                   {t.dayInitials.map((dayText, idx) => {
                     const isSelected = repeatDays.includes(idx);
                     return (
@@ -1059,6 +1157,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                           style={[
                             styles.dayButtonText,
                             {
+                              fontSize: responsive.ms(12.5),
                               color: isSelected ? '#FFFFFF' : colors.textSecondary,
                               fontFamily: typography.numbersBold,
                             },
@@ -1074,11 +1173,23 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
               {/* Interval Mode Switcher inside Edit Modal (Standard vs Escalating) for Multi-Alarm modes */}
               {alarmType !== 'single' && (
-                <View style={styles.sectionContainer}>
+                <View
+                  style={[
+                    styles.sectionContainer,
+                    {
+                      marginHorizontal: responsive.screenPadding,
+                      marginBottom: responsive.s(14),
+                    },
+                  ]}
+                >
                   <Text
                     style={[
                       styles.sectionHeading,
-                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(10.5),
+                        color: colors.textSecondary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.intervalAlarmTypeLabel.toUpperCase()}
@@ -1098,6 +1209,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       onPress={() => handleToggleEscalatingInEdit(false)}
                       style={[
                         styles.modeToggleTab,
+                        { paddingVertical: responsive.s(8.5) },
                         !isEscalating && {
                           backgroundColor: colors.surfaceSubtle,
                           borderRadius: radii.chipInner,
@@ -1108,6 +1220,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                         style={[
                           styles.modeToggleText,
                           {
+                            fontSize: responsive.ms(12.5),
                             color: !isEscalating ? colors.textPrimary : colors.textMuted,
                             fontFamily: typography.numbersBold,
                           },
@@ -1121,6 +1234,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       onPress={() => handleToggleEscalatingInEdit(true)}
                       style={[
                         styles.modeToggleTab,
+                        { paddingVertical: responsive.s(8.5) },
                         isEscalating && {
                           backgroundColor: colors.primaryMuted,
                           borderRadius: radii.chipInner,
@@ -1128,13 +1242,14 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       ]}
                     >
                       <Flame
-                        size={14}
+                        size={Math.round(responsive.ms(13))}
                         color={isEscalating ? colors.primary : colors.textMuted}
                       />
                       <Text
                         style={[
                           styles.modeToggleText,
                           {
+                            fontSize: responsive.ms(12.5),
                             color: isEscalating ? colors.primaryLight : colors.textMuted,
                             fontFamily: typography.numbersBold,
                           },
@@ -1149,7 +1264,15 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
 
               {/* Collapsible Granular Controls Dropdown (Controlled by Settings Toggle) */}
               {showAlarmSequenceSection && (
-                <View style={styles.sectionContainer}>
+                <View
+                  style={[
+                    styles.sectionContainer,
+                    {
+                      marginHorizontal: responsive.screenPadding,
+                      marginBottom: responsive.s(14),
+                    },
+                  ]}
+                >
                   <View
                     style={[
                       styles.dropdownCard,
@@ -1416,9 +1539,17 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               )}
 
               {/* Skip Next Occurrence & Duplicate Alarm Quick Actions */}
-              {(onToggleSkipNext || onDuplicate) && (
-                <View style={styles.quickActionRow}>
-                  {onToggleSkipNext && (
+              {((onToggleSkipNext && alarm.isEnabled) || onDuplicate) && (
+                <View
+                  style={[
+                    styles.quickActionRow,
+                    {
+                      marginHorizontal: responsive.screenPadding,
+                      marginBottom: responsive.s(8),
+                    },
+                  ]}
+                >
+                  {onToggleSkipNext && alarm.isEnabled && (
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => {
@@ -1428,6 +1559,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       style={[
                         styles.quickActionBtn,
                         {
+                          paddingVertical: responsive.s(11),
                           backgroundColor: alarm.skipNextDate
                             ? 'rgba(245, 158, 11, 0.14)'
                             : colors.surface,
@@ -1439,14 +1571,18 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       ]}
                     >
                       {alarm.skipNextDate ? (
-                        <CalendarCheck size={15} color="#F59E0B" />
+                        <CalendarCheck size={Math.round(responsive.ms(14))} color="#F59E0B" />
                       ) : (
-                        <CalendarOff size={15} color={colors.textSecondary} />
+                        <CalendarOff
+                          size={Math.round(responsive.ms(14))}
+                          color={colors.textSecondary}
+                        />
                       )}
                       <Text
                         style={[
                           styles.quickActionBtnText,
                           {
+                            fontSize: responsive.ms(12),
                             color: alarm.skipNextDate ? '#F59E0B' : colors.textPrimary,
                             fontFamily: typography.sansBold,
                           },
@@ -1471,17 +1607,22 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                       style={[
                         styles.quickActionBtn,
                         {
+                          paddingVertical: responsive.s(11),
                           backgroundColor: colors.surface,
                           borderColor: colors.surfaceBorder,
                           borderRadius: radii.buttonMedium,
                         },
                       ]}
                     >
-                      <Copy size={15} color={colors.accent} />
+                      <Copy size={Math.round(responsive.ms(14))} color={colors.accent} />
                       <Text
                         style={[
                           styles.quickActionBtnText,
-                          { color: colors.textPrimary, fontFamily: typography.sansBold },
+                          {
+                            fontSize: responsive.ms(12),
+                            color: colors.textPrimary,
+                            fontFamily: typography.sansBold,
+                          },
                         ]}
                         numberOfLines={1}
                       >
@@ -1500,17 +1641,27 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                   style={[
                     styles.deleteAlarmBtn,
                     {
+                      marginHorizontal: responsive.screenPadding,
+                      paddingVertical: responsive.s(12),
                       backgroundColor: colors.surface,
                       borderColor: 'rgba(220, 96, 64, 0.25)',
                       borderRadius: radii.buttonMedium,
                     },
                   ]}
                 >
-                  <Trash2 size={16} color={colors.danger} strokeWidth={2.2} />
+                  <Trash2
+                    size={Math.round(responsive.ms(15))}
+                    color={colors.danger}
+                    strokeWidth={2.2}
+                  />
                   <Text
                     style={[
                       styles.deleteAlarmText,
-                      { color: colors.danger, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(13.5),
+                        color: colors.danger,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.delete}
@@ -1524,6 +1675,9 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               style={[
                 styles.bottomActionBar,
                 {
+                  paddingHorizontal: responsive.screenPadding,
+                  paddingTop: responsive.s(10),
+                  paddingBottom: responsive.modalBottomPadding,
                   borderTopColor: colors.surfaceBorder,
                   backgroundColor: colors.background,
                 },
@@ -1535,6 +1689,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 style={[
                   styles.bottomCancelBtn,
                   {
+                    paddingVertical: responsive.s(12),
                     backgroundColor: colors.surface,
                     borderColor: colors.surfaceBorder,
                     borderRadius: radii.buttonMedium,
@@ -1544,7 +1699,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 <Text
                   style={[
                     styles.bottomCancelBtnText,
-                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(14.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.cancel}
@@ -1557,6 +1716,7 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 style={[
                   styles.bottomSaveBtn,
                   {
+                    paddingVertical: responsive.s(12),
                     backgroundColor: colors.textPrimary,
                     borderRadius: radii.buttonMedium,
                   },
@@ -1565,7 +1725,11 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
                 <Text
                   style={[
                     styles.bottomSaveBtnText,
-                    { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(14.5),
+                      color: colors.textOnPrimary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.saveChanges}
@@ -1626,6 +1790,10 @@ export const AlarmEditModal: React.FC<AlarmEditModalProps> = ({
               style={[
                 styles.confirmCard,
                 {
+                  maxWidth: responsive.modalMaxWidth,
+                  alignSelf: 'center',
+                  paddingHorizontal: responsive.s(20),
+                  paddingBottom: responsive.modalBottomPadding + 8,
                   backgroundColor: colors.surfaceElevated,
                   borderColor: colors.surfaceBorder,
                   borderTopLeftRadius: radii.modalOuter,
@@ -1755,8 +1923,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollView: {
-    flexGrow: 0,
-    flexShrink: 1,
+    flex: 1,
   },
   modeToggleRow: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
   Modal,
   View,
@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Sun, Clock, Bell, Volume2 } from 'lucide-react-native';
+import { Sun, Clock, Bell } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { useTranslation } from '../../../core/i18n/translations';
@@ -16,8 +16,8 @@ import { alarmSoundPlayer } from '../../../core/audio/alarmSoundPlayer';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
 export const AlarmRingingOverlay: React.FC = () => {
-  const { colors, typography, radii, shadows } = useTheme();
-  const { t, language, formatNum } = useTranslation();
+  const { colors, typography, radii, shadows, responsive } = useTheme();
+  const { t, language, formatTime12h } = useTranslation();
   const defaultSnoozeMinutes = useSettingsStore((s) => s.defaultSnoozeMinutes);
   const volumeButtonAction = useSettingsStore((s) => s.volumeButtonAction);
   const {
@@ -28,6 +28,7 @@ export const AlarmRingingOverlay: React.FC = () => {
   } = useAlarmStore();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [now, setNow] = useState(() => new Date());
 
   const isSequence = Boolean(
     activeRinging &&
@@ -61,13 +62,18 @@ export const AlarmRingingOverlay: React.FC = () => {
 
   useEffect(() => {
     if (activeRinging) {
+      setNow(new Date());
+      const clockInterval = setInterval(() => {
+        setNow(new Date());
+      }, 1000);
+
       // Start audio chime and rhythmic haptic loop
       alarmSoundPlayer.startAlarmSound();
 
       const animation = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.06,
+            toValue: 1.04,
             duration: 1000,
             useNativeDriver: true,
           }),
@@ -90,6 +96,7 @@ export const AlarmRingingOverlay: React.FC = () => {
       });
 
       return () => {
+        clearInterval(clockInterval);
         animation.stop();
         removeVolumeListener();
         alarmSoundPlayer.stopAlarmSound();
@@ -103,6 +110,20 @@ export const AlarmRingingOverlay: React.FC = () => {
   const totalSteps = activeRinging.totalSteps ?? 1;
   const hasRemainingSteps = isSequence && currentStep + 1 < totalSteps;
 
+  const headerTitleText = activeRinging.alarm.label?.trim() || t.timesUp;
+
+  const { time: timeDigits, period: periodText } = formatTime12h(
+    now.getHours(),
+    now.getMinutes()
+  );
+
+  const actionBtnHeight = responsive.isVerySmall
+    ? 80
+    : responsive.isCompact
+      ? 88
+      : 106;
+  const actionIconSize = Math.round(responsive.ms(34));
+
   return (
     <Modal
       visible={true}
@@ -111,119 +132,112 @@ export const AlarmRingingOverlay: React.FC = () => {
       statusBarTranslucent={true}
       onRequestClose={handleSnooze}
     >
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        {/* Top Header */}
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: colors.background,
+            paddingTop: responsive.topInset + responsive.s(18),
+            paddingBottom: responsive.bottomNavInset + responsive.s(18),
+          },
+        ]}
+      >
+        {/* Top Header: Shows Alarm Label or "Time's up!" */}
         <View style={styles.topHeader}>
           <View style={styles.headerTitleRow}>
-            <Bell size={22} color={colors.accent} strokeWidth={2.4} />
+            <Bell
+              size={Math.round(responsive.ms(22))}
+              color={colors.accent}
+              strokeWidth={2.4}
+            />
             <Text
+              numberOfLines={2}
               style={[
                 styles.headerTitle,
-                { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                {
+                  fontSize: responsive.ms(21),
+                  color: colors.textPrimary,
+                  fontFamily: typography.numbersBold,
+                },
               ]}
             >
-              {t.ringingNow}
+              {headerTitleText}
             </Text>
           </View>
         </View>
 
-        {/* Center Clock & Ringing Visual */}
+        {/* Center Clock (No Container Box, Small AM/PM) */}
         <View style={styles.centerSection}>
           <Animated.View
             style={[
-              styles.pulseCircle,
+              styles.timeRow,
               {
-                borderColor: colors.surfaceBorder,
-                borderRadius: radii.modalOuter,
                 transform: [{ scale: pulseAnim }],
               },
             ]}
           >
-            <View
+            <Text
               style={[
-                styles.innerPulseCircle,
+                styles.timeDisplay,
                 {
-                  borderColor: colors.surfaceBorderHighlight,
-                  backgroundColor: colors.surfaceElevated,
-                  borderRadius: radii.cardOuter,
+                  fontSize: responsive.ms(68),
+                  lineHeight: responsive.ms(76),
+                  color: colors.textPrimary,
+                  fontFamily: typography.numbersBold,
                 },
               ]}
             >
+              {timeDigits}
+            </Text>
+            {periodText ? (
               <Text
                 style={[
-                  styles.timeDisplay,
+                  styles.periodDisplay,
                   {
-                    color: colors.textPrimary,
+                    fontSize: responsive.ms(16),
+                    lineHeight: responsive.ms(22),
+                    marginLeft: responsive.s(6),
+                    marginBottom: responsive.s(10),
+                    color: colors.textSecondary,
                     fontFamily: typography.numbersBold,
                   },
                 ]}
               >
-                {formatNum(activeRinging.currentTimeString)}
-              </Text>
-            </View>
-          </Animated.View>
-
-          <View style={styles.alarmInfoBadge}>
-            {activeRinging.alarm.label ? (
-              <Text
-                style={[
-                  styles.alarmLabel,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
-                ]}
-              >
-                {activeRinging.alarm.label}
+                {periodText}
               </Text>
             ) : null}
+          </Animated.View>
 
-            {isSequence && (
+          {isSequence && (
+            <View style={[styles.alarmInfoBadge, { marginTop: responsive.s(10) }]}>
               <Text
                 style={[
                   styles.stepCounterText,
-                  { color: colors.accent, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(13),
+                    color: colors.accent,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.alarmsActiveOfTotal(currentStep + 1, totalSteps)}
               </Text>
-            )}
-
-            {volumeButtonAction !== 'none' && (
-              <View
-                style={[
-                  styles.volumeHintPill,
-                  {
-                    backgroundColor: colors.surfaceSubtle,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.pill,
-                  },
-                ]}
-              >
-                <Volume2 size={12} color={colors.textSecondary} />
-                <Text
-                  style={[
-                    styles.volumeHintText,
-                    { color: colors.textSecondary, fontFamily: typography.sansMedium },
-                  ]}
-                >
-                  {language === 'bn'
-                    ? `ভলিউম বাটন: ${
-                        volumeButtonAction === 'snooze'
-                          ? t.volumeActionSnooze
-                          : t.volumeActionDismiss
-                      }`
-                    : `Volume button: ${
-                        volumeButtonAction === 'snooze'
-                          ? t.volumeActionSnooze
-                          : t.volumeActionDismiss
-                      }`}
-                </Text>
-              </View>
-            )}
-          </View>
+            </View>
+          )}
         </View>
 
         {/* Big Action Buttons - Flex Side by Side */}
-        <View style={styles.actionsSection}>
-          <View style={styles.actionsRow}>
+        <View
+          style={[
+            styles.actionsSection,
+            {
+              maxWidth: responsive.modalMaxWidth,
+              alignSelf: 'center',
+              paddingHorizontal: responsive.screenPadding,
+            },
+          ]}
+        >
+          <View style={[styles.actionsRow, { gap: responsive.s(14) }]}>
             {/* SNOOZE BUTTON */}
             <TouchableOpacity
               activeOpacity={0.8}
@@ -231,17 +245,27 @@ export const AlarmRingingOverlay: React.FC = () => {
               style={[
                 styles.actionBigBtn,
                 {
+                  height: actionBtnHeight,
+                  paddingVertical: responsive.s(12),
                   backgroundColor: colors.surfaceElevated,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.cardOuter,
                 },
               ]}
             >
-              <Clock size={36} color={colors.textSecondary} strokeWidth={2.2} />
+              <Clock
+                size={actionIconSize}
+                color={colors.textSecondary}
+                strokeWidth={2.2}
+              />
               <Text
                 style={[
                   styles.actionSmallText,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(11.5),
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.snoozeBtn(snoozeDuration).toUpperCase()}
@@ -256,17 +280,23 @@ export const AlarmRingingOverlay: React.FC = () => {
                 styles.actionBigBtn,
                 shadows.buttonPrimary,
                 {
+                  height: actionBtnHeight,
+                  paddingVertical: responsive.s(12),
                   backgroundColor: colors.primary,
                   borderColor: 'rgba(255, 255, 255, 0.1)',
                   borderRadius: radii.cardOuter,
                 },
               ]}
             >
-              <Sun size={36} color="#FFFFFF" strokeWidth={2.4} />
+              <Sun size={actionIconSize} color="#FFFFFF" strokeWidth={2.4} />
               <Text
                 style={[
                   styles.actionSmallText,
-                  { color: '#FFFFFF', fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(11.5),
+                    color: '#FFFFFF',
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.dismissAlarmBtn.toUpperCase()}
@@ -281,6 +311,8 @@ export const AlarmRingingOverlay: React.FC = () => {
               style={[
                 styles.dismissAllBtn,
                 {
+                  marginTop: responsive.s(10),
+                  paddingVertical: responsive.s(12),
                   backgroundColor: colors.surface,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.buttonMedium,
@@ -290,7 +322,11 @@ export const AlarmRingingOverlay: React.FC = () => {
               <Text
                 style={[
                   styles.dismissAllBtnText,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(11.5),
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {language === 'bn'
@@ -320,60 +356,45 @@ const styles = StyleSheet.create({
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
   },
   headerTitle: {
-    fontSize: 20,
-    letterSpacing: 0.5,
+    fontSize: 21,
+    letterSpacing: 0.3,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   centerSection: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
   },
-  pulseCircle: {
-    width: 260,
-    height: 260,
-    borderWidth: 1,
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  innerPulseCircle: {
-    width: 220,
-    height: 220,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   timeDisplay: {
-    fontSize: 44,
-    lineHeight: 52,
+    fontSize: 68,
+    lineHeight: 76,
     textAlign: 'center',
+    includeFontPadding: false,
+    letterSpacing: -1,
+  },
+  periodDisplay: {
+    fontSize: 16,
+    lineHeight: 22,
+    letterSpacing: 0.6,
     includeFontPadding: false,
   },
   alarmInfoBadge: {
     alignItems: 'center',
     gap: 4,
   },
-  alarmLabel: {
-    fontSize: 18,
-  },
   stepCounterText: {
     fontSize: 13,
     letterSpacing: 0.5,
-  },
-  volumeHintPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    marginTop: 6,
-  },
-  volumeHintText: {
-    fontSize: 11.5,
   },
   actionsSection: {
     width: '100%',

@@ -74,7 +74,8 @@ export const TRANSLATIONS = {
     everyNMinBadge: (mins: number) => `Every ${mins}m`,
     beforeBadge: (count: number, mins: number) => `${count}x Before (${mins}m)`,
     afterBadge: (count: number, mins: number) => `${count}x After (${mins}m)`,
-    alarmsActiveOfTotal: (active: number, total: number) => `${active} of ${total} alarms`,
+    alarmsActiveOfTotal: (active: number, total: number) =>
+      `${active} of ${total} ${total === 1 ? 'alarm' : 'alarms'}`,
     alarmsCountSummary: (count: number) => `${count} ${count === 1 ? 'alarm' : 'alarms'}`,
 
     // Creation & Edit Modals
@@ -134,7 +135,8 @@ export const TRANSLATIONS = {
     useDialTooltip: 'Pick time on clock dial',
 
     // Ringing Overlay
-    ringingNow: 'ALARM RINGING',
+    ringingNow: "Time's up!",
+    timesUp: "Time's up!",
     defaultIntervalAlarmTitle: 'Alarm',
     intervalCascadeSub: (mins: number) => `Rings every ${mins}m`,
     escalatingCascadeSub: 'Escalating Alarms',
@@ -200,6 +202,41 @@ export const TRANSLATIONS = {
       'This will reset your theme, default times, and custom categories back to their original defaults. Your saved alarms will not be deleted.',
     resetSettingsToast: 'Default settings restored',
     viewSourceCodeBtn: 'View Source Code',
+    checkForUpdatesBtn: 'Check for Updates',
+    checkingUpdatesBtn: 'Checking for Updates...',
+    updateLatestToast: 'You are on the latest version (v1.0.0)',
+    updateDownloadingToast: 'Update found! Downloading & restarting...',
+    updateDevModeToast: 'v1.0.0 • OTA updates run in release/APK builds',
+    updateErrorToast: 'Could not check for updates right now',
+    changelogBtn: 'Changelog (v1.0.0)',
+    changelogModalTitle: 'Release Notes — v1.0.0',
+    changelogModalSub: 'Initial release of Alarming with full interval & escalating alarm engine.',
+    changelogSectionsV100: [
+      {
+        title: 'Alarm Engine & Modes',
+        items: [
+          'Single, Window (Start to End), and Before/After alarm cascades.',
+          'Standard fixed intervals and Escalating intervals (15m → 10m → 5m → 3m → 2m → 1m).',
+          'Expandable individual alarm sequence editor to toggle or fine-tune specific steps.',
+        ],
+      },
+      {
+        title: 'Categories & Smart Scheduling',
+        items: [
+          'Custom category tags with smart 12:00 AM midnight pause (Off for Today / Off Through Tomorrow) and accurate overnight cycle tracking.',
+          'Category-scoped "Already awake?" early skip banner and Skip Next occurrence.',
+          'Quick Power Nap timer with customizable duration presets and 5-minute fine-tuning stepper.',
+        ],
+      },
+      {
+        title: 'UI, Responsiveness & OTA Updates',
+        items: [
+          'Responsive scaling across 720p compact phones, standard phones, and tablets with full 3-button & gesture navigation safe areas.',
+          'Refined container corners, containerless ringing clock, compact AM/PM on alarm cards, full-card touch targets, and scroll-safe radial clock dial.',
+          'Over-The-Air (OTA) auto-update and manual update checker via Expo Updates.',
+        ],
+      },
+    ],
 
     // Settings ? Tooltips (Simple & clear for every option)
     tooltipTheme: 'Switch between dark mode (best for night) and light mode.',
@@ -266,30 +303,41 @@ export const TRANSLATIONS = {
     skippingNextBadge: (dateLabel: string) => `Skipping: ${dateLabel}`,
     pausedFor24hBadge: 'Off for 24h',
 
-    // Categories & 24h Group Pause
+    // Categories & Smart Day-Boundary Group Pause
     categoryLabel: 'Category',
     categoryAll: 'All',
     categoryNone: 'None',
     groupToggleBtnOn: (cat: string) => `Turn on all ${cat} alarms`,
-    groupToggleBtnOff: (cat: string) => `Turn off all ${cat} alarms for 24h`,
+    groupToggleBtnOff: (cat: string) => `Turn off all ${cat} alarms for today`,
     groupToggleActionOn: (cat: string) => `Turn on all ${cat} alarms`,
-    groupToggleActionOff: (cat: string) => `Turn off all ${cat} alarms for 24h`,
+    groupToggleActionOff: (cat: string) => `Turn off all ${cat} alarms for today`,
+    groupToggleActionOffToday: (cat: string) => `Turn off all ${cat} alarms for today`,
+    groupToggleActionOffTomorrow: (cat: string) => `Turn off all ${cat} alarms for tomorrow`,
+    groupToggleSubHintToday: 'Until 12:00 AM',
+    groupToggleSubHintTomorrow: 'Through tomorrow',
+    groupToggleSubHintResume: 'Resume now',
+    groupPauseModeTodayTitle: 'Rest of Today (Until 12:00 AM)',
+    groupPauseModeTodayDesc:
+      "Stops remaining alarms today. Tomorrow's alarms will ring on time.",
+    groupPauseModeTomorrowTitle: 'Through Tomorrow (Until Tomorrow 12:00 AM)',
+    groupPauseModeTomorrowDesc:
+      'Pauses alarms for the rest of today and all day tomorrow.',
     groupToggleConfirmTitle: (cat: string, enable: boolean) =>
-      enable ? `Turn On All ${cat} Alarms?` : `Turn Off ${cat} Alarms for 24 Hours?`,
+      enable ? `Turn On All ${cat} Alarms?` : `Pause ${cat} Alarms?`,
     groupToggleModalTitle: (cat: string, enable: boolean) =>
-      enable ? `Turn On All ${cat} Alarms?` : `Turn Off ${cat} Alarms for 24 Hours?`,
+      enable ? `Turn On All ${cat} Alarms?` : `Pause ${cat} Alarms?`,
     groupToggleConfirmDesc: (cat: string, count: number, enable: boolean) =>
       enable
         ? `This will turn on all ${count} ${cat} ${count === 1 ? 'alarm' : 'alarms'} right now.`
-        : `This will pause all ${count} ${cat} ${
+        : `Choose how long to pause your ${count} ${cat} ${
             count === 1 ? 'alarm' : 'alarms'
-          } for the next 24 hours, then automatically turn them back on.`,
+          }. They will automatically turn back on at 12:00 AM.`,
     groupToggleModalBody: (cat: string, count: number, enable: boolean) =>
       enable
         ? `This will turn on all ${count} ${cat} ${count === 1 ? 'alarm' : 'alarms'} right now.`
-        : `This will pause all ${count} ${cat} ${
+        : `Choose how long to pause your ${count} ${cat} ${
             count === 1 ? 'alarm' : 'alarms'
-          } for the next 24 hours, then automatically turn them back on.`,
+          }. They will automatically turn back on at 12:00 AM.`,
     cancelBtn: 'Cancel',
     confirmBtn: 'Confirm',
     confirmActionBtn: 'Confirm',
@@ -438,7 +486,8 @@ export const TRANSLATIONS = {
     useDialTooltip: 'ঘড়ির কাঁটা ঘুরিয়ে সময় নিন',
 
     // Ringing Overlay
-    ringingNow: 'অ্যালার্ম বাজছে',
+    ringingNow: 'সময় হয়েছে!',
+    timesUp: 'সময় হয়েছে!',
     defaultIntervalAlarmTitle: 'অ্যালার্ম',
     intervalCascadeSub: (mins: number) =>
       `${formatNumberLocalized(mins, 'bn')} মিনিট পরপর অ্যালার্ম`,
@@ -507,6 +556,41 @@ export const TRANSLATIONS = {
       'এতে আপনার থিম, ডিফল্ট সময় এবং কাস্টম ক্যাটাগরিগুলো আগের অবস্থায় ফিরে যাবে। আপনার সেভ করা অ্যালার্মগুলো মুছে যাবে না।',
     resetSettingsToast: 'ডিফল্ট সেটিংস ফিরিয়ে আনা হয়েছে',
     viewSourceCodeBtn: 'সোর্স কোড দেখুন',
+    checkForUpdatesBtn: 'আপডেট চেক করুন',
+    checkingUpdatesBtn: 'আপডেট খোঁজা হচ্ছে...',
+    updateLatestToast: 'আপনি সর্বশেষ ভার্সনে আছেন (v1.0.0)',
+    updateDownloadingToast: 'নতুন আপডেট পাওয়া গেছে! ডাউনলোড হচ্ছে...',
+    updateDevModeToast: 'v1.0.0 • রিলিজ/APK বিল্ডে অটো-আপডেট কাজ করে',
+    updateErrorToast: 'এই মুহূর্তে আপডেট চেক করা যায়নি',
+    changelogBtn: 'চেঞ্জলগ (v1.0.0)',
+    changelogModalTitle: 'রিলিজ নোটস — v1.0.0',
+    changelogModalSub: 'অ্যালার্মিং অ্যাপের প্রথম রিলিজ (v1.0.0)-এর সকল সুবিধাসমূহ।',
+    changelogSectionsV100: [
+      {
+        title: 'অ্যালার্ম ইঞ্জিন ও মোড',
+        items: [
+          'একবার (Single), সময়সীমা (Window) এবং আগে/পরে (Before/After) অ্যালার্ম মোড।',
+          'সাধারণ নির্দিষ্ট বিরতি এবং ধাপে ধাপে ঘন (Escalating: ১৫মি → ১০মি → ৫মি → ৩মি → ২মি → ১মি) অ্যালার্ম।',
+          'প্রতিটি ধাপের সময় আলাদাভাবে পরিবর্তন বা বন্ধ করার সুবিধা।',
+        ],
+      },
+      {
+        title: 'ক্যাটাগরি ও স্মার্ট শিডিউল',
+        items: [
+          'কাস্টম ক্যাটাগরি ট্যাগ এবং রাত ১২:০০টা পর্যন্ত আজকের জন্য বা আগামীকালের জন্য সব অ্যালার্ম বন্ধ করার সুবিধা।',
+          'ক্যাটাগরি অনুযায়ী "ঘুম ভেঙে গেছে?" কার্ড এবং পরের বার স্কিপ করার অপশন।',
+          'কাস্টম সময়সহ দ্রুত পাওয়ার ন্যাপ টাইমার।',
+        ],
+      },
+      {
+        title: 'ডিজাইন, রেসপনসিভনেস ও আপডেট',
+        items: [
+          '৭২০পি ছোট স্ক্রিন, সাধারণ ফোন এবং ট্যাবলেটের জন্য রেসপনসিভ লেআউট ও নেভিগেশন বার সেফ এরিয়া।',
+          'মার্জিত কন্টেইনার কর্নার, কন্টেইনার ছাড়া পরিষ্কার রিংয়িং ঘড়ি, পুরো কার্ড জুড়ে ট্যাপ এরিয়া এবং স্ক্রল-সেফ ঘড়ির ডায়াল।',
+          'অ্যাপের ভেতর থেকেই সরাসরি অটো-আপডেট ও ম্যানুয়াল আপডেট চেক করার সুবিধা।',
+        ],
+      },
+    ],
 
     // Settings ? Tooltips
     tooltipTheme: 'ডার্ক মোড (রাতের জন্য আরামদায়ক) এবং লাইট মোডের মধ্যে পরিবর্তন করুন।',
@@ -571,36 +655,44 @@ export const TRANSLATIONS = {
     skippingNextBadge: (dateLabel: string) => `পরের বার বন্ধ: ${dateLabel}`,
     pausedFor24hBadge: '২৪ ঘণ্টার জন্য বন্ধ',
 
-    // Categories & 24h Group Pause
+    // Categories & Smart Day-Boundary Group Pause
     categoryLabel: 'ক্যাটাগরি',
     categoryAll: 'সবগুলো',
     categoryNone: 'কিছু না',
     groupToggleBtnOn: (cat: string) => `সব ${cat} অ্যালার্ম চালু করুন`,
-    groupToggleBtnOff: (cat: string) => `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করুন`,
+    groupToggleBtnOff: (cat: string) => `সব ${cat} অ্যালার্ম আজকের জন্য বন্ধ করুন`,
     groupToggleActionOn: (cat: string) => `সব ${cat} অ্যালার্ম চালু করুন`,
-    groupToggleActionOff: (cat: string) => `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করুন`,
+    groupToggleActionOff: (cat: string) => `সব ${cat} অ্যালার্ম আজকের জন্য বন্ধ করুন`,
+    groupToggleActionOffToday: (cat: string) => `সব ${cat} অ্যালার্ম আজকের জন্য বন্ধ করুন`,
+    groupToggleActionOffTomorrow: (cat: string) =>
+      `সব ${cat} অ্যালার্ম আগামীকালের জন্য বন্ধ করুন`,
+    groupToggleSubHintToday: 'রাত ১২:০০টা পর্যন্ত',
+    groupToggleSubHintTomorrow: 'আগামীকাল সারাদিন',
+    groupToggleSubHintResume: 'এখনই চালু করুন',
+    groupPauseModeTodayTitle: 'আজকের বাকি সময় (রাত ১২:০০টা পর্যন্ত)',
+    groupPauseModeTodayDesc:
+      'আজকের বাকি অ্যালার্মগুলো বন্ধ থাকবে, আগামীকাল সকাল থেকে যথাসময়ে বাজবে।',
+    groupPauseModeTomorrowTitle: 'আগামীকাল সারাদিন (পরশু রাত ১২:০০টা পর্যন্ত)',
+    groupPauseModeTomorrowDesc:
+      'আজকের বাকি সময় এবং আগামীকাল সারাদিন এই ক্যাটাগরির অ্যালার্ম বন্ধ থাকবে।',
     groupToggleConfirmTitle: (cat: string, enable: boolean) =>
-      enable
-        ? `সব ${cat} অ্যালার্ম চালু করবেন?`
-        : `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করবেন?`,
+      enable ? `সব ${cat} অ্যালার্ম চালু করবেন?` : `সব ${cat} অ্যালার্ম সাময়িক বন্ধ করবেন?`,
     groupToggleModalTitle: (cat: string, enable: boolean) =>
-      enable
-        ? `সব ${cat} অ্যালার্ম চালু করবেন?`
-        : `সব ${cat} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করবেন?`,
+      enable ? `সব ${cat} অ্যালার্ম চালু করবেন?` : `সব ${cat} অ্যালার্ম সাময়িক বন্ধ করবেন?`,
     groupToggleConfirmDesc: (cat: string, count: number, enable: boolean) =>
       enable
         ? `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম এখনই চালু হয়ে যাবে।`
-        : `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(
+        : `${cat} ক্যাটাগরির ${formatNumberLocalized(
             count,
             'bn'
-          )}টি) অ্যালার্ম আগামী ২৪ ঘণ্টার জন্য বন্ধ থাকবে এবং এরপর নিজে থেকেই আবার চালু হবে।`,
+          )}টি অ্যালার্ম কতক্ষণের জন্য বন্ধ রাখতে চান বেছে নিন। রাত ১২:০০টায় নিজে থেকেই আবার চালু হবে।`,
     groupToggleModalBody: (cat: string, count: number, enable: boolean) =>
       enable
         ? `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(count, 'bn')}টি) অ্যালার্ম এখনই চালু হয়ে যাবে।`
-        : `এতে ${cat} ক্যাটাগরির সবগুলো (${formatNumberLocalized(
+        : `${cat} ক্যাটাগরির ${formatNumberLocalized(
             count,
             'bn'
-          )}টি) অ্যালার্ম আগামী ২৪ ঘণ্টার জন্য বন্ধ থাকবে এবং এরপর নিজে থেকেই আবার চালু হবে।`,
+          )}টি অ্যালার্ম কতক্ষণের জন্য বন্ধ রাখতে চান বেছে নিন। রাত ১২:০০টায় নিজে থেকেই আবার চালু হবে।`,
     cancelBtn: 'বাতিল',
     confirmBtn: 'হ্যাঁ, করুন',
     confirmActionBtn: 'হ্যাঁ, করুন',

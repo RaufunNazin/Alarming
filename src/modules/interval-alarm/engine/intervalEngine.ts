@@ -48,6 +48,85 @@ export function isCycleSkippedForDate(alarm: AlarmItem, cycleBaseDate: Date): bo
 }
 
 /**
+ * Checks whether the currently active cycle (including an in-progress overnight cycle
+ * from yesterday that has not yet finished its final step) is dismissed.
+ */
+export function isCurrentActiveCycleDismissed(
+  alarm: AlarmItem,
+  referenceDate: Date = new Date()
+): boolean {
+  if (!alarm.dismissedForToday || !alarm.lastDismissedDate) {
+    return false;
+  }
+  if (isCycleDismissedForDate(alarm, referenceDate)) {
+    return true;
+  }
+  const steps = getAlarmSteps(alarm);
+  const firstStep = steps[0];
+  const lastStep = steps[steps.length - 1];
+  if (firstStep && lastStep && lastStep.totalMinutesFromStart > 0) {
+    const yesterdayBase = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate() - 1,
+      firstStep.hour,
+      firstStep.minute,
+      0,
+      0
+    );
+    const cycleEndMs =
+      yesterdayBase.getTime() + lastStep.totalMinutesFromStart * 60 * 1000;
+    if (
+      cycleEndMs >= referenceDate.getTime() &&
+      isCycleDismissedForDate(alarm, yesterdayBase)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns true if `alarm.skipNextDate` is still upcoming today/future OR belongs to an
+ * in-progress overnight cycle from yesterday whose final step has not yet passed.
+ */
+export function hasActiveOrUpcomingSkippedCycle(
+  alarm: AlarmItem,
+  referenceDate: Date = new Date()
+): boolean {
+  if (!alarm.skipNextDate) {
+    return false;
+  }
+  const todayStr = getLocalDateString(referenceDate);
+  if (alarm.skipNextDate >= todayStr) {
+    return true;
+  }
+  const steps = getAlarmSteps(alarm);
+  const firstStep = steps[0];
+  const lastStep = steps[steps.length - 1];
+  if (firstStep && lastStep && lastStep.totalMinutesFromStart > 0) {
+    const yesterdayBase = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate() - 1,
+      firstStep.hour,
+      firstStep.minute,
+      0,
+      0
+    );
+    const cycleEndMs =
+      yesterdayBase.getTime() + lastStep.totalMinutesFromStart * 60 * 1000;
+    if (
+      cycleEndMs >= referenceDate.getTime() &&
+      isCycleSkippedForDate(alarm, yesterdayBase)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Formats a 'YYYY-MM-DD' date string into a concise human-readable label (e.g., "Mon, Oct 26").
  */
 export function formatSkippedDateLabel(dateStr: string): string {
@@ -1121,10 +1200,7 @@ export function findNextUpcomingAlarm(
   alarms: AlarmItem[],
   referenceDate: Date = new Date()
 ): { nextAlarm: AlarmItem; nextDate: Date; countdownText: string } | null {
-  const nowMs = referenceDate.getTime();
-  const enabledAlarms = alarms.filter(
-    (a) => a.isEnabled && !(a.pausedUntil && a.pausedUntil > nowMs)
-  );
+  const enabledAlarms = alarms.filter((a) => a.isEnabled);
   if (enabledAlarms.length === 0) {
     return null;
   }
@@ -1145,6 +1221,182 @@ export function findNextUpcomingAlarm(
     nextDate: earliest.nextDate,
     countdownText: getGoogleCountdownText(earliest.nextDate, referenceDate),
   };
+}
+
+export type CategoryPauseMode = 'rest_of_today' | 'tomorrow';
+
+/**
+ * Returns the epoch ms for 12:00 AM midnight at the end of today (00:00:00 of tomorrow).
+ */
+export function getEndOfTodayMs(referenceDate: Date = new Date()): number {
+  return new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate() + 1,
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+}
+
+/**
+ * Returns the epoch ms for 12:00 AM midnight at the end of tomorrow (00:00:00 of the day after tomorrow).
+ */
+export function getEndOfTomorrowMs(referenceDate: Date = new Date()): number {
+  return new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate() + 2,
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+}
+
+/**
+ * Checks whether an enabled alarm still has any un-dismissed steps remaining today before 12:00 AM midnight.
+ */
+export function hasRemainingStepsToday(
+  alarm: AlarmItem,
+  referenceDate: Date = new Date()
+): boolean {
+  if (!alarm.isEnabled) return false;
+  const nowMs = referenceDate.getTime();
+  const endOfTodayMs = getEndOfTodayMs(referenceDate);
+
+  if (alarm.pausedUntil && alarm.pausedUntil >= endOfTodayMs) {
+    return false;
+  }
+
+  if (
+    alarm.snoozedUntil &&
+    alarm.snoozedUntil > nowMs &&
+    alarm.snoozedUntil < endOfTodayMs
+  ) {
+    return true;
+  }
+
+  const upcomingSteps = getUpcomingAlarmStepDates(alarm, referenceDate);
+  return upcomingSteps.some(
+    (s) => s.date.getTime() > nowMs && s.date.getTime() < endOfTodayMs
+  );
+}
+
+/**
+ * Inspects all enabled alarms in a category and determines whether pausing should default
+ * to the rest of today (until 12:00 AM tonight) or through tomorrow (if all of today's alarms already passed).
+ */
+export function getCategorySmartPauseInfo(
+  alarms: AlarmItem[],
+  category: string,
+  referenceDate: Date = new Date()
+): {
+  hasAlarmsLeftToday: boolean;
+  recommendedMode: CategoryPauseMode;
+  endOfTodayMs: number;
+  endOfTomorrowMs: number;
+} {
+  const categoryAlarms = alarms.filter((a) => a.category === category && a.isEnabled);
+  const hasAlarmsLeftToday = categoryAlarms.some((a) =>
+    hasRemainingStepsToday(a, referenceDate)
+  );
+  const recommendedMode: CategoryPauseMode = hasAlarmsLeftToday
+    ? 'rest_of_today'
+    : 'tomorrow';
+
+  return {
+    hasAlarmsLeftToday,
+    recommendedMode,
+    endOfTodayMs: getEndOfTodayMs(referenceDate),
+    endOfTomorrowMs: getEndOfTomorrowMs(referenceDate),
+  };
+}
+
+/**
+ * Formats the Style B pause/dismissal badge on an AlarmCardItem:
+ * e.g. "Off until 12:00 AM • Rings tomorrow 09:00 AM"
+ * or "Off through tomorrow • Rings Mon 09:00 AM"
+ */
+export function formatPauseStatusBadge(
+  alarm: AlarmItem,
+  referenceDate: Date = new Date()
+): string | null {
+  if (!alarm.isEnabled) return null;
+
+  const nowMs = referenceDate.getTime();
+  const isPaused = Boolean(alarm.pausedUntil && alarm.pausedUntil > nowMs);
+  const isDismissedToday = isCurrentActiveCycleDismissed(alarm, referenceDate);
+
+  if (!isPaused && !isDismissedToday) {
+    return null;
+  }
+
+  const lang = useSettingsStore.getState().language;
+  const endOfTodayMs = getEndOfTodayMs(referenceDate);
+  const endOfTomorrowMs = getEndOfTomorrowMs(referenceDate);
+  const nextDate = calculateNextOccurrence(alarm, referenceDate);
+  const nextTimeStr = formatTime12hLocalized(
+    nextDate.getHours(),
+    nextDate.getMinutes(),
+    lang
+  ).full;
+
+  const tomorrowDate = new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate() + 1
+  );
+  const isNextTomorrow =
+    getLocalDateString(nextDate) === getLocalDateString(tomorrowDate);
+  const isNextToday =
+    getLocalDateString(nextDate) === getLocalDateString(referenceDate);
+
+  const dayNamesEn = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNamesBn = ['রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহঃ', 'শুক্র', 'শনি'];
+
+  if (lang === 'bn') {
+    const nextDayTimeStr = isNextToday
+      ? `আজ ${nextTimeStr}`
+      : isNextTomorrow
+        ? `আগামীকাল ${nextTimeStr}`
+        : `${dayNamesBn[nextDate.getDay()]} ${nextTimeStr}`;
+
+    if (isDismissedToday || (alarm.pausedUntil && alarm.pausedUntil <= endOfTodayMs)) {
+      return `রাত ১২:০০টা পর্যন্ত বন্ধ • ${nextDayTimeStr}-এ বাজবে`;
+    }
+    if (alarm.pausedUntil && alarm.pausedUntil <= endOfTomorrowMs) {
+      return `আগামীকাল সারাদিন বন্ধ • ${nextDayTimeStr}-এ বাজবে`;
+    }
+    const pauseEndDate = new Date(alarm.pausedUntil!);
+    const pauseEndTimeStr = formatTime12hLocalized(
+      pauseEndDate.getHours(),
+      pauseEndDate.getMinutes(),
+      'bn'
+    ).full;
+    return `${pauseEndTimeStr} পর্যন্ত বন্ধ • ${nextDayTimeStr}-এ বাজবে`;
+  }
+
+  const nextDayTimeStr = isNextToday
+    ? `today ${nextTimeStr}`
+    : isNextTomorrow
+      ? `tomorrow ${nextTimeStr}`
+      : `${dayNamesEn[nextDate.getDay()]} ${nextTimeStr}`;
+
+  if (isDismissedToday || (alarm.pausedUntil && alarm.pausedUntil <= endOfTodayMs)) {
+    return `Off until 12:00 AM • Rings ${nextDayTimeStr}`;
+  }
+  if (alarm.pausedUntil && alarm.pausedUntil <= endOfTomorrowMs) {
+    return `Off through tomorrow • Rings ${nextDayTimeStr}`;
+  }
+  const pauseEndDate = new Date(alarm.pausedUntil!);
+  const pauseEndTimeStr = formatTime12hLocalized(
+    pauseEndDate.getHours(),
+    pauseEndDate.getMinutes(),
+    'en'
+  ).full;
+  return `Off until ${pauseEndTimeStr} • Rings ${nextDayTimeStr}`;
 }
 
 /**

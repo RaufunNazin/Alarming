@@ -39,3 +39,9 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## Changelog & Versioning
+
+- **Always update `CHANGELOG.md` and the in-app changelog (`src/core/i18n/translations.ts` / `SettingsModal.tsx`)** whenever you add, modify, or fix features.
+- While the app has not yet been published to the Play Store (`version: "1.0.0"` in `package.json` and `app.json`), consolidate all changes under the **`[1.0.0]`** release section rather than creating new version numbers, unless the user explicitly asks to bump the version for a new release.
+- When the user requests a new version release in the future, bump the version in `package.json` and `app.json`, add a new version section at the top of `CHANGELOG.md`, and update the in-app changelog in `SettingsModal.tsx` and `src/core/i18n/translations.ts`.

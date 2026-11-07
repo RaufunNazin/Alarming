@@ -12,11 +12,16 @@ interface SquircleToggleButtonProps {
 export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = React.memo(function SquircleToggleButton({
   isEnabled,
   onToggle,
-  size = 54,
+  size,
 }) {
-  const { colors, radii, shadows } = useTheme();
+  const { colors, shadows, responsive } = useTheme();
+  const effectiveSize = size ?? responsive.toggleSize;
+  const effectiveRadius = Math.round(effectiveSize * 0.225);
+  const bellOnSize = Math.round(effectiveSize * 0.43);
+  const bellOffSize = Math.round(effectiveSize * 0.4);
 
-  const handlePress = () => {
+  const handlePress = (e?: { stopPropagation?: () => void }) => {
+    e?.stopPropagation?.();
     onToggle();
   };
 
@@ -32,9 +37,9 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = React.m
         styles.squircle,
         shadows.squircle,
         {
-          width: size,
-          height: size,
-          borderRadius: radii.squircleToggle,
+          width: effectiveSize,
+          height: effectiveSize,
+          borderRadius: effectiveRadius,
           backgroundColor,
           borderColor,
         },
@@ -45,9 +50,9 @@ export const SquircleToggleButton: React.FC<SquircleToggleButtonProps> = React.m
       accessibilityLabel={isEnabled ? 'Alarm enabled' : 'Alarm disabled'}
     >
       {isEnabled ? (
-        <Bell size={24} color={iconColor} strokeWidth={2.4} />
+        <Bell size={bellOnSize} color={iconColor} strokeWidth={2.3} />
       ) : (
-        <BellOff size={22} color={iconColor} strokeWidth={2} />
+        <BellOff size={bellOffSize} color={iconColor} strokeWidth={2} />
       )}
     </TouchableOpacity>
   );

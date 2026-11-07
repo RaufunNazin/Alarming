@@ -27,17 +27,21 @@ import { useSheetModalGesture } from './useSheetModalGesture';
 
 interface AlarmCreationModalProps {
   visible: boolean;
+  initialCategory?: string;
   onClose: () => void;
   onSave: (alarmData: Omit<AlarmItem, 'id'>) => void;
 }
 
 export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   visible,
+  initialCategory,
   onClose,
   onSave,
 }) => {
-  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, formatTime12h: formatTime12hLocal } = useTranslation();
+  const actionBtnHeight = responsive.isCompact ? 42 : 48;
+  const dayPillHeight = responsive.isCompact ? 34 : 38;
   const lastSelectedType = useAlarmStore((s) => s.lastSelectedType);
   const setLastSelectedType = useAlarmStore((s) => s.setLastSelectedType);
 
@@ -68,6 +72,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
   const [activeTimeTab, setActiveTimeTab] = useState<'start' | 'end'>('start');
   const [dialResetKey, setDialResetKey] = useState(0);
   const [isKeyboardMode, setIsKeyboardMode] = useState(false);
+  const [isDialDragging, setIsDialDragging] = useState(false);
   const [startHour, setStartHour] = useState(12);
   const [startMinute, setStartMinute] = useState(0);
   const [endHour, setEndHour] = useState(13);
@@ -92,6 +97,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       setActiveTimeTab('start');
       setDialResetKey((k) => k + 1);
       setIsKeyboardMode(false);
+      setIsDialDragging(false);
       setStartHour(next.hour);
       setStartMinute(next.minute);
       setEndHour(Math.floor(endTotal / 60));
@@ -100,11 +106,18 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       setAlarmCount(settings.defaultAlarmCount || 10);
       setIntervalMinutes(settings.defaultIntervalMinutes || 10);
       setRepeatDays([]);
-      setCategory(undefined);
+      setCategory(initialCategory);
     }
-  }, [visible]);
+  }, [visible, initialCategory]);
 
   const handleSelectType = (type: AlarmType) => {
+    if (type === 'interval' && endHour === startHour && endMinute === startMinute) {
+      const windowSpan =
+        useSettingsStore.getState().defaultWindowDurationMinutes || 60;
+      const endTotal = (startHour * 60 + startMinute + windowSpan) % (24 * 60);
+      setEndHour(Math.floor(endTotal / 60));
+      setEndMinute(endTotal % 60);
+    }
     setAlarmType(type);
     setActiveTimeTab('start');
     setDialResetKey((k) => k + 1);
@@ -144,6 +157,15 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
       nextStartM = minute;
       setStartHour(hour);
       setStartMinute(minute);
+      if (alarmType !== 'interval') {
+        const windowSpan =
+          useSettingsStore.getState().defaultWindowDurationMinutes || 60;
+        const endTotal = (hour * 60 + minute + windowSpan) % (24 * 60);
+        nextEndH = Math.floor(endTotal / 60);
+        nextEndM = endTotal % 60;
+        setEndHour(nextEndH);
+        setEndMinute(nextEndM);
+      }
     }
 
     if (alarmType === 'interval') {
@@ -293,6 +315,9 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
             styles.modalContent,
             shadows.modal,
             {
+              height: responsive.isCompact ? '92%' : '88%',
+              maxWidth: responsive.modalMaxWidth,
+              alignSelf: 'center',
               backgroundColor: colors.background,
               borderColor: colors.surfaceBorder,
               borderTopLeftRadius: radii.modalOuter,
@@ -302,7 +327,16 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
           ]}
         >
           {/* Top Drag Handle Zone */}
-          <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
+          <View
+            {...dragHandlePanHandlers}
+            style={[
+              styles.dragHandleZone,
+              {
+                paddingTop: responsive.s(10),
+                paddingBottom: responsive.s(12),
+              },
+            ]}
+          >
             <View
               style={[
                 styles.handleBar,
@@ -319,16 +353,22 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
 
           <ScrollView
             style={styles.scrollView}
+            scrollEnabled={!isDialDragging}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: responsive.s(14) },
+            ]}
           >
             {/* Alarm Type Switcher */}
             <View
               style={[
                 styles.segmentedType,
                 {
+                  marginHorizontal: responsive.screenPadding,
+                  marginBottom: responsive.s(12),
                   backgroundColor: colors.surface,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.chip,
@@ -344,6 +384,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => handleSelectType(tab.key)}
                     style={[
                       styles.typeSegment,
+                      { paddingVertical: responsive.s(8) },
                       isSelected && {
                         backgroundColor: colors.surfaceSubtle,
                         borderRadius: radii.chipInner,
@@ -354,6 +395,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                       style={[
                         styles.typeText,
                         {
+                          fontSize: responsive.ms(13),
                           color: isSelected ? colors.textPrimary : colors.textMuted,
                           fontFamily: typography.numbersBold,
                         },
@@ -372,6 +414,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               selectedMinute={currentDialMinute}
               onTimeChange={handleTimeChange}
               onMinuteSelectionComplete={handleMinuteSelectionComplete}
+              onDialDragStateChange={setIsDialDragging}
               resetKey={dialResetKey}
               isKeyboardMode={isKeyboardMode}
               liveDurationParts={liveRingParts}
@@ -379,14 +422,23 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
 
             {/* Mode-Specific Controls Below Clock */}
             {alarmType === 'interval' && (
-              <View style={styles.intervalTimesContainer}>
-                <View style={styles.intervalCardRow}>
+              <View
+                style={[
+                  styles.intervalTimesContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                  },
+                ]}
+              >
+                <View style={[styles.intervalCardRow, { gap: responsive.s(10) }]}>
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={() => handleSelectTimeTab('start')}
                     style={[
                       styles.timeSelectorCard,
                       {
+                        padding: responsive.s(12),
                         backgroundColor:
                           activeTimeTab === 'start' ? colors.surfaceSubtle : colors.surface,
                         borderColor:
@@ -398,7 +450,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     <Text
                       style={[
                         styles.timeCardLabel,
-                        { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                        {
+                          fontSize: responsive.ms(10.5),
+                          color: colors.textSecondary,
+                          fontFamily: typography.numbersBold,
+                        },
                       ]}
                     >
                       {t.startTime.toUpperCase()}
@@ -406,7 +462,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     <Text
                       style={[
                         styles.timeCardValue,
-                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                        {
+                          fontSize: responsive.ms(15.5),
+                          color: colors.textPrimary,
+                          fontFamily: typography.numbersBold,
+                        },
                       ]}
                     >
                       {formatTime12hLocal(startHour, startMinute).full}
@@ -419,6 +479,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     style={[
                       styles.timeSelectorCard,
                       {
+                        padding: responsive.s(12),
                         backgroundColor:
                           activeTimeTab === 'end' ? colors.surfaceSubtle : colors.surface,
                         borderColor:
@@ -430,7 +491,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     <Text
                       style={[
                         styles.timeCardLabel,
-                        { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                        {
+                          fontSize: responsive.ms(10.5),
+                          color: colors.textSecondary,
+                          fontFamily: typography.numbersBold,
+                        },
                       ]}
                     >
                       {t.endTime.toUpperCase()}
@@ -438,7 +503,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     <Text
                       style={[
                         styles.timeCardValue,
-                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                        {
+                          fontSize: responsive.ms(15.5),
+                          color: colors.textPrimary,
+                          fontFamily: typography.numbersBold,
+                        },
                       ]}
                     >
                       {formatTime12hLocal(endHour, endMinute).full}
@@ -449,7 +518,15 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
             )}
 
             {alarmType === 'offset' && showCreationAdvancedControls && (
-              <View style={styles.offsetOptionsContainer}>
+              <View
+                style={[
+                  styles.offsetOptionsContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                  },
+                ]}
+              >
                 <View
                   style={[
                     styles.offsetDirectionRow,
@@ -465,6 +542,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setOffsetDirection('before')}
                     style={[
                       styles.directionTab,
+                      { paddingVertical: responsive.s(9) },
                       offsetDirection === 'before' && {
                         backgroundColor: colors.surfaceSubtle,
                         borderRadius: radii.chipInner,
@@ -475,6 +553,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                       style={[
                         styles.directionTabText,
                         {
+                          fontSize: responsive.ms(12),
                           color:
                             offsetDirection === 'before'
                               ? colors.textPrimary
@@ -492,6 +571,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setOffsetDirection('after')}
                     style={[
                       styles.directionTab,
+                      { paddingVertical: responsive.s(9) },
                       offsetDirection === 'after' && {
                         backgroundColor: colors.surfaceSubtle,
                         borderRadius: radii.chipInner,
@@ -502,6 +582,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                       style={[
                         styles.directionTabText,
                         {
+                          fontSize: responsive.ms(12),
                           color:
                             offsetDirection === 'after'
                               ? colors.textPrimary
@@ -523,6 +604,9 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 style={[
                   styles.escalatingBanner,
                   {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                    padding: responsive.s(12),
                     backgroundColor: colors.primaryMuted,
                     borderColor: colors.primary + '55',
                     borderRadius: radii.cardInner,
@@ -531,11 +615,15 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               >
                 <View style={styles.escalatingBannerHeader}>
                   <View style={styles.escalatingTitleRow}>
-                    <Flame size={16} color={colors.primary} />
+                    <Flame size={Math.round(responsive.ms(15))} color={colors.primary} />
                     <Text
                       style={[
                         styles.escalatingBannerTitle,
-                        { color: colors.textPrimary, fontFamily: typography.sansBold },
+                        {
+                          fontSize: responsive.ms(12.5),
+                          color: colors.textPrimary,
+                          fontFamily: typography.sansBold,
+                        },
                       ]}
                     >
                       {t.escalatingModeActiveTitle}
@@ -544,7 +632,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                   <Text
                     style={[
                       styles.escalatingCountText,
-                      { color: colors.primaryLight, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(11.5),
+                        color: colors.primaryLight,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.generatesNAlarms(previewSteps.length)}
@@ -553,7 +645,12 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 <Text
                   style={[
                     styles.escalatingBannerDesc,
-                    { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                    {
+                      fontSize: responsive.ms(11.5),
+                      lineHeight: responsive.ms(16.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.sansRegular,
+                    },
                   ]}
                 >
                   {alarmType === 'interval' ? t.escalatingWindowDesc : t.escalatingModeDesc}
@@ -563,11 +660,23 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
 
             {/* Interval Length Stepper */}
             {alarmType !== 'single' && !isEscalatingMode && showCreationAdvancedControls && (
-              <View style={styles.sectionContainer}>
+              <View
+                style={[
+                  styles.sectionContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                  },
+                ]}
+              >
                 <Text
                   style={[
                     styles.sectionHeading,
-                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(10.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.intervalLabel.toUpperCase()}
@@ -587,13 +696,21 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setIntervalMinutes(Math.max(1, intervalMinutes - 1))}
                     style={styles.stepperBtn}
                   >
-                    <Minus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                    <Minus
+                      size={Math.round(responsive.ms(17))}
+                      color={colors.textPrimary}
+                      strokeWidth={2.4}
+                    />
                   </TouchableOpacity>
 
                   <Text
                     style={[
                       styles.stepperValueText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(14.5),
+                        color: colors.textPrimary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.everyNMin(intervalMinutes)}
@@ -604,7 +721,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setIntervalMinutes(Math.min(60, intervalMinutes + 1))}
                     style={styles.stepperBtn}
                   >
-                    <Plus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                    <Plus
+                      size={Math.round(responsive.ms(17))}
+                      color={colors.textPrimary}
+                      strokeWidth={2.4}
+                    />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -612,11 +733,23 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
 
             {/* Offset Alarm Count Stepper */}
             {alarmType === 'offset' && !isEscalatingMode && showCreationAdvancedControls && (
-              <View style={styles.sectionContainer}>
+              <View
+                style={[
+                  styles.sectionContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                  },
+                ]}
+              >
                 <Text
                   style={[
                     styles.sectionHeading,
-                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(10.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.alarmsCountLabel.toUpperCase()}
@@ -636,13 +769,21 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setAlarmCount(Math.max(2, alarmCount - 1))}
                     style={styles.stepperBtn}
                   >
-                    <Minus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                    <Minus
+                      size={Math.round(responsive.ms(17))}
+                      color={colors.textPrimary}
+                      strokeWidth={2.4}
+                    />
                   </TouchableOpacity>
 
                   <Text
                     style={[
                       styles.stepperValueText,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(14.5),
+                        color: colors.textPrimary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {t.alarmsCountSummary(alarmCount)}
@@ -653,23 +794,39 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     onPress={() => setAlarmCount(Math.min(30, alarmCount + 1))}
                     style={styles.stepperBtn}
                   >
-                    <Plus size={18} color={colors.textPrimary} strokeWidth={2.4} />
+                    <Plus
+                      size={Math.round(responsive.ms(17))}
+                      color={colors.textPrimary}
+                      strokeWidth={2.4}
+                    />
                   </TouchableOpacity>
                 </View>
               </View>
             )}
 
             {/* Repeat Days Selector */}
-            <View style={styles.sectionContainer}>
+            <View
+              style={[
+                styles.sectionContainer,
+                {
+                  marginHorizontal: responsive.screenPadding,
+                  marginTop: responsive.s(12),
+                },
+              ]}
+            >
               <Text
                 style={[
                   styles.sectionHeading,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(10.5),
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.repeatDaysLabel.toUpperCase()}
               </Text>
-              <View style={styles.repeatRow}>
+              <View style={[styles.repeatRow, { gap: responsive.s(5) }]}>
                 {t.dayInitials.map((dayInitial, idx) => {
                   const isDaySelected = repeatDays.includes(idx);
                   return (
@@ -680,6 +837,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                       style={[
                         styles.dayPill,
                         {
+                          height: dayPillHeight,
                           backgroundColor: isDaySelected ? colors.primary : colors.surface,
                           borderColor: isDaySelected
                             ? colors.primaryLight
@@ -692,6 +850,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         style={[
                           styles.dayPillText,
                           {
+                            fontSize: responsive.ms(12.5),
                             color: isDaySelected ? '#FFFFFF' : colors.textSecondary,
                             fontFamily: typography.numbersBold,
                           },
@@ -707,11 +866,23 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
 
             {/* Category Tag Selector */}
             {categories.length > 0 && (
-              <View style={styles.sectionContainer}>
+              <View
+                style={[
+                  styles.sectionContainer,
+                  {
+                    marginHorizontal: responsive.screenPadding,
+                    marginTop: responsive.s(12),
+                  },
+                ]}
+              >
                 <Text
                   style={[
                     styles.sectionHeading,
-                    { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                    {
+                      fontSize: responsive.ms(10.5),
+                      color: colors.textSecondary,
+                      fontFamily: typography.numbersBold,
+                    },
                   ]}
                 >
                   {t.categoryLabel.toUpperCase()}
@@ -730,6 +901,8 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                     style={[
                       styles.categoryChip,
                       {
+                        paddingHorizontal: responsive.s(11),
+                        paddingVertical: responsive.s(6),
                         backgroundColor: !category ? colors.accent : colors.surface,
                         borderColor: !category ? colors.accent : colors.surfaceBorder,
                         borderRadius: radii.chip,
@@ -740,6 +913,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                       style={[
                         styles.categoryChipText,
                         {
+                          fontSize: responsive.ms(11.5),
                           color: !category ? '#FFFFFF' : colors.textSecondary,
                           fontFamily: !category ? typography.sansBold : typography.sansMedium,
                         },
@@ -762,6 +936,8 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         style={[
                           styles.categoryChip,
                           {
+                            paddingHorizontal: responsive.s(11),
+                            paddingVertical: responsive.s(6),
                             backgroundColor: isSelected ? colors.accent : colors.surface,
                             borderColor: isSelected ? colors.accent : colors.surfaceBorder,
                             borderRadius: radii.chip,
@@ -769,13 +945,14 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                         ]}
                       >
                         <Tag
-                          size={11}
+                          size={Math.round(responsive.ms(10.5))}
                           color={isSelected ? '#FFFFFF' : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.categoryChipText,
                             {
+                              fontSize: responsive.ms(11.5),
                               color: isSelected ? '#FFFFFF' : colors.textSecondary,
                               fontFamily: isSelected
                                 ? typography.sansBold
@@ -798,6 +975,9 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
             style={[
               styles.bottomActionBar,
               {
+                paddingHorizontal: responsive.screenPadding,
+                paddingTop: responsive.s(10),
+                paddingBottom: responsive.modalBottomPadding,
                 borderTopColor: colors.surfaceBorder,
                 backgroundColor: colors.background,
               },
@@ -817,6 +997,8 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 style={[
                   styles.bottomKeypadBtn,
                   {
+                    width: actionBtnHeight,
+                    height: actionBtnHeight,
                     backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
                     borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
                     borderRadius: radii.button,
@@ -824,9 +1006,12 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
                 ]}
               >
                 {isKeyboardMode ? (
-                  <Clock size={20} color={colors.primary} />
+                  <Clock size={Math.round(responsive.ms(19))} color={colors.primary} />
                 ) : (
-                  <KeyboardIcon size={20} color={colors.textSecondary} />
+                  <KeyboardIcon
+                    size={Math.round(responsive.ms(19))}
+                    color={colors.textSecondary}
+                  />
                 )}
               </TouchableOpacity>
             )}
@@ -840,6 +1025,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               style={[
                 styles.bottomCancelBtn,
                 {
+                  height: actionBtnHeight,
                   backgroundColor: colors.surface,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.button,
@@ -849,7 +1035,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               <Text
                 style={[
                   styles.bottomCancelBtnText,
-                  { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(14.5),
+                    color: colors.textSecondary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.cancel}
@@ -862,6 +1052,7 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               style={[
                 styles.bottomSaveBtn,
                 {
+                  height: actionBtnHeight,
                   backgroundColor: colors.textPrimary,
                   borderRadius: radii.button,
                 },
@@ -870,7 +1061,11 @@ export const AlarmCreationModal: React.FC<AlarmCreationModalProps> = ({
               <Text
                 style={[
                   styles.bottomSaveBtnText,
-                  { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
+                  {
+                    fontSize: responsive.ms(14.5),
+                    color: colors.textOnPrimary,
+                    fontFamily: typography.numbersBold,
+                  },
                 ]}
               >
                 {t.save}
@@ -908,8 +1103,7 @@ const styles = StyleSheet.create({
     height: 4,
   },
   scrollView: {
-    flexGrow: 0,
-    flexShrink: 1,
+    flex: 1,
   },
   scrollContent: {
     paddingBottom: 16,

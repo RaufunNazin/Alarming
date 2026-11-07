@@ -15,13 +15,15 @@ import {
 } from '@expo-google-fonts/outfit';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Updates from 'expo-updates';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider } from './src/core/theme';
+import { ThemeProvider, useTheme } from './src/core/theme';
 import { useSettingsStore } from './src/core/settings/settingsStore';
 import { getActiveModule } from './src/modules/registry';
 import { useAlarmStore } from './src/modules/interval-alarm/store/alarmStore';
 import {
   initializeAlarmNotifications,
+  registerNotificationCategories,
   ACTION_DISMISS_ALL,
   ACTION_DISMISS_SINGLE,
   ACTION_SNOOZE_NEXT,
@@ -45,6 +47,27 @@ if (Platform.OS !== 'web') {
   void SplashScreen.preventAutoHideAsync().catch(() => {});
 }
 
+function ResponsiveAppShell({ themeMode }: { themeMode: string }) {
+  const { responsive } = useTheme();
+  return (
+    <View
+      style={[
+        styles.webOuter,
+        themeMode === 'light' && { backgroundColor: '#F5F6F9' },
+      ]}
+    >
+      <View
+        style={[
+          styles.webContainer,
+          { maxWidth: responsive.contentMaxWidth },
+        ]}
+      >
+        <ActiveScreen />
+      </View>
+    </View>
+  );
+}
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     Caveat_400Regular,
@@ -58,11 +81,25 @@ export default function App() {
   });
 
   const initialize = useAlarmStore((s) => s.initialize);
+  const isInitialized = useAlarmStore((s) => s.isInitialized);
+  const rescheduleAllActiveAlarms = useAlarmStore((s) => s.rescheduleAllActiveAlarms);
   const dismissAllRemainingForToday = useAlarmStore((s) => s.dismissAllRemainingForToday);
   const dismissSingleAlarm = useAlarmStore((s) => s.dismissSingleAlarm);
   const triggerFromNotification = useAlarmStore((s) => s.triggerFromNotification);
   const checkAlarmTriggerTick = useAlarmStore((s) => s.checkAlarmTriggerTick);
   const themeMode = useSettingsStore((s) => s.themeMode);
+  const language = useSettingsStore((s) => s.language);
+  const prevLanguageRef = React.useRef(language);
+
+  useEffect(() => {
+    void registerNotificationCategories(language);
+    if (isInitialized && prevLanguageRef.current !== language) {
+      prevLanguageRef.current = language;
+      void rescheduleAllActiveAlarms();
+    } else {
+      prevLanguageRef.current = language;
+    }
+  }, [language, isInitialized, rescheduleAllActiveAlarms]);
 
   useEffect(() => {
     void useSettingsStore.getState().loadSettings();
@@ -82,6 +119,23 @@ export default function App() {
 
     const initPromise = initialize();
     void initializeAlarmNotifications();
+
+    const checkAndApplyOtaUpdate = async () => {
+      if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled) {
+        return;
+      }
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          if (!useAlarmStore.getState().activeRinging) {
+            await Updates.reloadAsync();
+          }
+        }
+      } catch {}
+    };
+
+    void checkAndApplyOtaUpdate();
 
     const handledResponseKeys = new Set<string>();
 
@@ -140,6 +194,7 @@ export default function App() {
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         void syncPresentedOrDueAlarms();
+        void checkAndApplyOtaUpdate();
       }
     });
 
@@ -257,16 +312,7 @@ export default function App() {
       style={styles.safeAreaProvider}
     >
       <ThemeProvider>
-        <View
-          style={[
-            styles.webOuter,
-            themeMode === 'light' && { backgroundColor: '#F5F6F9' },
-          ]}
-        >
-          <View style={styles.webContainer}>
-            <ActiveScreen />
-          </View>
-        </View>
+        <ResponsiveAppShell themeMode={themeMode} />
       </ThemeProvider>
     </SafeAreaProvider>
   );

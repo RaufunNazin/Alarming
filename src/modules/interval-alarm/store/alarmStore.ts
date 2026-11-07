@@ -21,7 +21,10 @@ import {
   findDueAlarmStepAtTime,
   getLocalDateString,
   formatSkippedDateLabel,
-  isCycleDismissedForDate,
+  isCurrentActiveCycleDismissed,
+  hasActiveOrUpcomingSkippedCycle,
+  CategoryPauseMode,
+  getCategorySmartPauseInfo,
 } from '../engine/intervalEngine';
 import { useSettingsStore } from '../../../core/settings/settingsStore';
 import { formatNumberLocalized, TRANSLATIONS } from '../../../core/i18n/translations';
@@ -50,7 +53,11 @@ interface AlarmState {
   duplicateAlarm: (id: string) => Promise<string | undefined>;
   toggleSkipNextOccurrence: (id: string) => Promise<void>;
   dismissUpcomingToday: (id: string) => Promise<void>;
-  toggleCategoryAlarms: (category: string, enable: boolean) => Promise<void>;
+  toggleCategoryAlarms: (
+    category: string,
+    enable: boolean,
+    pauseMode?: CategoryPauseMode
+  ) => Promise<void>;
   clearCategoryFromAlarms: (category: string) => Promise<void>;
   retainOnlyCategoriesOnAlarms: (allowedCategories: string[]) => Promise<void>;
   toggleAlarm: (id: string) => Promise<void>;
@@ -70,6 +77,7 @@ interface AlarmState {
   }) => void;
   showToast: (message: string, actionLabel?: string, onAction?: () => void) => void;
   hideToast: () => void;
+  rescheduleAllActiveAlarms: () => Promise<void>;
   checkAlarmTriggerTick: () => void;
 }
 
@@ -150,7 +158,6 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
       const now = new Date();
       const nowMs = now.getTime();
-      const todayStr = getLocalDateString(now);
 
       let storageNeedsCleanup = false;
       const alarms: AlarmItem[] = (Array.isArray(rawAlarms) ? rawAlarms : [])
@@ -160,7 +167,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         )
         .map((alarm) => {
           const expiredPause = Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs);
-          const expiredSkip = Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr);
+          const expiredSkip = Boolean(
+            alarm.skipNextDate && !hasActiveOrUpcomingSkippedCycle(alarm, now)
+          );
           const invalidStartHour = !Number.isFinite(alarm.startHour);
           const invalidStartMinute = !Number.isFinite(alarm.startMinute);
 
@@ -562,8 +571,8 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
 
       const lang = useSettingsStore.getState().language;
       const t = TRANSLATIONS[lang];
-      const baseLabel = target.label?.trim() || (lang === 'bn' ? 'অ্যালার্ম' : 'Alarm');
-      const copyLabel = `${baseLabel} ${t.copySuffix}`;
+      const trimmedTargetLabel = target.label?.trim() || '';
+      const copyLabel = trimmedTargetLabel ? `${trimmedTargetLabel} ${t.copySuffix}` : '';
 
       const nowMs = Date.now();
       const newId = `alarm_${nowMs}_${Math.random().toString(36).substring(2, 6)}`;
@@ -602,6 +611,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       if (index === -1) return;
 
       const alarm = currentAlarms[index];
+      if (!alarm.isEnabled) return;
       const lang = useSettingsStore.getState().language;
       const t = TRANSLATIONS[lang];
 
@@ -622,6 +632,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       const updatedAlarm: AlarmItem = {
         ...alarm,
         skipNextDate: nextSkipDate,
+        ...(nextSkipDate
+          ? { snoozedUntil: undefined, snoozedStepIndex: undefined }
+          : {}),
       };
 
       const updatedAlarms = [...currentAlarms];
@@ -635,6 +648,9 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       });
 
       void AlarmStorage.saveAlarms(updatedAlarms);
+      if (nextSkipDate) {
+        void dismissPresentedNotificationsForAlarm(id);
+      }
       if (updatedAlarm.isEnabled) {
         void syncAlarmNotificationsInBackground(updatedAlarm);
       }
@@ -681,11 +697,18 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       }
     },
 
-    toggleCategoryAlarms: async (category, enable) => {
+    toggleCategoryAlarms: async (category, enable, pauseMode) => {
       const currentAlarms = get().alarms;
       const syncTargets: AlarmItem[] = [];
-      const nowMs = Date.now();
-      const pauseUntilMs = nowMs + 24 * 60 * 60 * 1000;
+      const now = new Date();
+      const nowMs = now.getTime();
+      const smartInfo = getCategorySmartPauseInfo(currentAlarms, category, now);
+      const resolvedPauseMode: CategoryPauseMode =
+        pauseMode ?? smartInfo.recommendedMode;
+      const pauseUntilMs =
+        resolvedPauseMode === 'rest_of_today'
+          ? smartInfo.endOfTodayMs
+          : smartInfo.endOfTomorrowMs;
 
       const updatedAlarms = currentAlarms.map((alarm) => {
         if (alarm.category === category) {
@@ -697,8 +720,10 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
                 ...alarm,
                 isEnabled: true,
                 pausedUntil: undefined,
+                skipNextDate: undefined,
                 enabledAt: nowMs,
                 dismissedForToday: false,
+                lastDismissedDate: undefined,
                 snoozedUntil: undefined,
                 snoozedStepIndex: undefined,
                 notificationIds: [],
@@ -706,8 +731,10 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
             : {
                 ...alarm,
                 pausedUntil: pauseUntilMs,
+                skipNextDate: undefined,
                 enabledAt: nowMs,
                 dismissedForToday: false,
+                lastDismissedDate: undefined,
                 snoozedUntil: undefined,
                 snoozedStepIndex: undefined,
                 notificationIds: [],
@@ -732,10 +759,14 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         lang === 'bn'
           ? enable
             ? `সব ${category} অ্যালার্ম চালু করা হয়েছে`
-            : `সব ${category} অ্যালার্ম ২৪ ঘণ্টার জন্য বন্ধ করা হয়েছে`
+            : resolvedPauseMode === 'rest_of_today'
+              ? `সব ${category} অ্যালার্ম আজ রাত ১২:০০টা পর্যন্ত বন্ধ করা হয়েছে`
+              : `সব ${category} অ্যালার্ম আগামীকাল সারাদিন বন্ধ করা হয়েছে`
           : enable
             ? `Turned on all ${category} alarms`
-            : `Turned off all ${category} alarms for 24 hours`;
+            : resolvedPauseMode === 'rest_of_today'
+              ? `Turned off all ${category} alarms until 12:00 AM`
+              : `Turned off all ${category} alarms through tomorrow`;
 
       set({
         alarms: updatedAlarms,
@@ -848,15 +879,21 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       if (index === -1) return;
 
       const alarm = currentAlarms[index];
-      const isPaused = Boolean(alarm.pausedUntil && alarm.pausedUntil > Date.now());
+      const now = new Date();
+      const isPaused = Boolean(
+        (alarm.pausedUntil && alarm.pausedUntil > now.getTime()) ||
+          isCurrentActiveCycleDismissed(alarm, now)
+      );
       const willEnable = isPaused ? true : !alarm.isEnabled;
 
       const updatedAlarm: AlarmItem = {
         ...alarm,
         isEnabled: willEnable,
         pausedUntil: undefined,
+        skipNextDate: undefined,
         enabledAt: willEnable ? Date.now() : alarm.enabledAt,
         dismissedForToday: false,
+        lastDismissedDate: undefined,
         snoozedUntil: undefined,
         snoozedStepIndex: undefined,
         notificationIds: willEnable ? alarm.notificationIds : [],
@@ -912,9 +949,13 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         return;
       }
 
+      const active = get().activeRinging;
       const alarm = currentAlarms[index];
       const dueStep = findDueAlarmStepAtTime(alarm, new Date());
-      const cycleDateStr = dueStep?.cycleDateStr || getLocalDateString(new Date());
+      const cycleDateStr =
+        (active?.alarm.id === alarmId ? active.cycleDateStr : undefined) ||
+        dueStep?.cycleDateStr ||
+        getLocalDateString(new Date());
       const isOneOff = alarm.isOneOff || !alarm.repeatDays || alarm.repeatDays.length === 0;
 
       const updatedAlarm: AlarmItem = {
@@ -1179,7 +1220,17 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       if (!target || !target.isEnabled) return;
       const now = new Date();
       if (target.pausedUntil && target.pausedUntil > now.getTime()) return;
-      if (!isSnooze && isCycleDismissedForDate(target, now)) return;
+      if (
+        !isSnooze &&
+        (isCurrentActiveCycleDismissed(target, now) ||
+          Boolean(
+            cycleDateStr &&
+              target.dismissedForToday &&
+              target.lastDismissedDate === cycleDateStr
+          ))
+      ) {
+        return;
+      }
 
       const resolvedStepIndex =
         typeof stepIndex === 'number'
@@ -1211,6 +1262,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
           alarm: cleanedTarget,
           currentStepIndex: resolvedStepIndex,
           totalSteps: resolvedTotalSteps,
+          cycleDateStr: resolvedCycleDate,
           currentTimeString:
             typeof timeString === 'string'
               ? timeString
@@ -1219,6 +1271,29 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
       });
       if (updatedAlarms !== currentAlarms) {
         void AlarmStorage.saveAlarms(updatedAlarms);
+      }
+    },
+
+    rescheduleAllActiveAlarms: async () => {
+      const currentAlarms = get().alarms;
+      for (const alarm of currentAlarms) {
+        if (alarm.isEnabled) {
+          void syncAlarmNotificationsInBackground(alarm);
+        }
+      }
+      const activeNap = get().activePowerNap;
+      if (activeNap && activeNap.endsAt > Date.now()) {
+        const lang = useSettingsStore.getState().language;
+        const notifId = await schedulePowerNapNotification(
+          activeNap.endsAt,
+          TRANSLATIONS[lang].powerNapLabel
+        );
+        const latestNap = get().activePowerNap;
+        if (latestNap && latestNap.endsAt === activeNap.endsAt && notifId) {
+          const updatedNap: ActivePowerNap = { ...latestNap, notificationId: notifId };
+          set({ activePowerNap: updatedNap });
+          void AlarmStorage.saveActivePowerNap(updatedNap);
+        }
       }
     },
 
@@ -1274,6 +1349,8 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
               ? alarm.snoozedStepIndex
               : 0;
 
+          const resolvedCycleDateStr =
+            dueStepAtSameMinute?.cycleDateStr || getLocalDateString(now);
           if (dueStepAtSameMinute) {
             triggeredMinutesSet.add(
               buildStepDedupKey(
@@ -1284,7 +1361,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
             );
           }
           triggeredMinutesSet.add(
-            buildStepDedupKey(alarm.id, restoredStepIndex, getLocalDateString(now))
+            buildStepDedupKey(alarm.id, restoredStepIndex, resolvedCycleDateStr)
           );
 
           const cleanedAlarm: AlarmItem = {
@@ -1300,6 +1377,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
               currentTimeString: timeStr,
               currentStepIndex: restoredStepIndex,
               totalSteps: steps.length,
+              cycleDateStr: resolvedCycleDateStr,
             },
           });
           void AlarmStorage.saveAlarms(updated);
@@ -1334,18 +1412,20 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
         triggeredMinutesSet.clear();
       }
 
-      const todayStr = getLocalDateString(now);
       const hasExpiredSkipOrPause = currentAlarms.some(
         (alarm) =>
-          Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr) ||
-          Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs)
+          Boolean(
+            alarm.skipNextDate && !hasActiveOrUpcomingSkippedCycle(alarm, now)
+          ) || Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs)
       );
 
       let cleanedAlarms = currentAlarms;
       if (hasExpiredSkipOrPause) {
         const unpausedAlarmsToResync: AlarmItem[] = [];
         cleanedAlarms = currentAlarms.map((alarm) => {
-          const clearSkip = Boolean(alarm.skipNextDate && alarm.skipNextDate < todayStr);
+          const clearSkip = Boolean(
+            alarm.skipNextDate && !hasActiveOrUpcomingSkippedCycle(alarm, now)
+          );
           const clearPause = Boolean(alarm.pausedUntil && alarm.pausedUntil <= nowMs);
           if (clearSkip || clearPause) {
             const nextAlarm: AlarmItem = {
@@ -1388,6 +1468,7 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
                 currentTimeString: dueStep.timeString,
                 currentStepIndex: dueStep.stepIndex,
                 totalSteps: dueStep.totalSteps,
+                cycleDateStr: dueStep.cycleDateStr,
               },
             });
 

@@ -70,11 +70,9 @@ export const AlarmStorage = {
   },
 
   async saveLastSelectedAlarmType(type: AlarmType): Promise<void> {
-    try {
+    return enqueueStorageWrite(async () => {
       await AsyncStorage.setItem(LAST_SELECTED_TYPE_KEY, type);
-    } catch (e) {
-      console.warn('Error saving last selected alarm type:', e);
-    }
+    });
   },
 
   async getLoveNoteGreeting(): Promise<string> {
@@ -91,11 +89,9 @@ export const AlarmStorage = {
   },
 
   async saveLoveNoteGreeting(note: string): Promise<void> {
-    try {
+    return enqueueStorageWrite(async () => {
       await AsyncStorage.setItem(GREETING_STORAGE_KEY, note);
-    } catch (e) {
-      console.warn('Error saving greeting:', e);
-    }
+    });
   },
 
   async getSettings<T extends Record<string, unknown>>(): Promise<Partial<T> | null> {

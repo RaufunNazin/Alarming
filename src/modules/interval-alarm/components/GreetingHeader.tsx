@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, AppState, Linking } from 'react-native';
 import { Settings, Flame, ShieldCheck, AlertTriangle, X } from 'lucide-react-native';
 import { useTheme } from '../../../core/theme';
@@ -22,10 +22,19 @@ const LOW_BATTERY_WARNING_THRESHOLD = 20;
 export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function GreetingHeader({
   onOpenSettings,
 }) {
-  const { colors, typography, spacing, radii } = useTheme();
+  const { colors, typography, radii, responsive } = useTheme();
   const { t, language } = useTranslation();
   const intervalModeType = useSettingsStore((s) => s.intervalModeType);
   const enableSafetyCheckBanner = useSettingsStore((s) => s.enableSafetyCheckBanner);
+
+  const iconBtnSize = responsive.isVerySmall
+    ? 31
+    : responsive.isCompact
+      ? 33
+      : responsive.isTablet
+        ? 40
+        : 38;
+  const iconSize = Math.round(responsive.ms(18));
 
   const [safetyStatus, setSafetyStatus] = useState<DeviceSafetyStatus>({
     batteryLevel: 100,
@@ -34,7 +43,6 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
     canUseFullScreenIntent: true,
   });
   const [notifGranted, setNotifGranted] = useState<boolean>(true);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshSafetyChecks = useCallback(async () => {
     if (!enableSafetyCheckBanner) return;
@@ -80,14 +88,6 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
     };
   }, [enableSafetyCheckBanner, refreshSafetyChecks]);
 
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, []);
-
   const isPermissionsReady = notifGranted && safetyStatus.canUseFullScreenIntent;
   const isVolumeMuted = safetyStatus.alarmVolumePercent <= 0;
   const isVolumeReduced = safetyStatus.alarmVolumePercent < SAFE_ALARM_VOLUME_THRESHOLD;
@@ -104,24 +104,13 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
   const showTimedToast = (
     message: string,
     actionLabel: string | null = null,
-    onAction: (() => void) | null = null,
-    durationMs: number = 3800
+    onAction: (() => void) | null = null
   ) => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-    }
     useAlarmStore.setState({
       toastMessage: message,
       toastActionLabel: actionLabel,
       onToastAction: onAction,
     });
-    toastTimerRef.current = setTimeout(() => {
-      useAlarmStore.setState({
-        toastMessage: null,
-        toastActionLabel: null,
-        onToastAction: null,
-      });
-    }, durationMs);
   };
 
   const handleSafetyBadgePress = async () => {
@@ -157,8 +146,7 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             void refreshSafetyChecks();
             useAlarmStore.getState().hideToast();
           });
-        },
-        4800
+        }
       );
       return;
     }
@@ -168,7 +156,7 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
       return;
     }
 
-    showTimedToast(t.safetyAllSystemsGo, null, null, 3200);
+    showTimedToast(t.safetyAllSystemsGo);
   };
 
   const handleOpenSettings = () => {
@@ -203,7 +191,14 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
     <View
       style={[
         styles.container,
-        { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+        {
+          paddingHorizontal: responsive.screenPadding,
+          paddingTop: responsive.s(6),
+          paddingBottom: responsive.s(9),
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.surfaceBorder + '88',
+          marginBottom: responsive.s(2),
+        },
       ]}
     >
       <View style={styles.leftRow}>
@@ -213,6 +208,8 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             {
               color: colors.textPrimary,
               fontFamily: typography.numbersBold,
+              fontSize: responsive.ms(22),
+              lineHeight: responsive.ms(27),
             },
           ]}
         >
@@ -227,14 +224,20 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
                 backgroundColor: colors.primaryMuted,
                 borderColor: colors.primary + '55',
                 borderRadius: radii.chip,
+                paddingHorizontal: responsive.s(8),
+                paddingVertical: responsive.s(3),
               },
             ]}
           >
-            <Flame size={12} color={colors.primary} />
+            <Flame size={Math.round(responsive.ms(12))} color={colors.primary} />
             <Text
               style={[
                 styles.escalatingPillText,
-                { color: colors.primaryLight, fontFamily: typography.sansBold },
+                {
+                  color: colors.primaryLight,
+                  fontFamily: typography.sansBold,
+                  fontSize: responsive.ms(10.5),
+                },
               ]}
             >
               {t.escalatingBadge}
@@ -252,6 +255,8 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             style={[
               styles.iconBtn,
               {
+                width: iconBtnSize,
+                height: iconBtnSize,
                 backgroundColor: badgeBgColor,
                 borderColor: badgeBorderColor,
                 borderRadius: radii.chip,
@@ -259,11 +264,11 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             ]}
           >
             {badgeStatus === 'healthy' ? (
-              <ShieldCheck size={18} color={colors.success} />
+              <ShieldCheck size={iconSize} color={colors.success} />
             ) : badgeStatus === 'warning' ? (
-              <AlertTriangle size={18} color="#F59E0B" strokeWidth={2.3} />
+              <AlertTriangle size={iconSize} color="#F59E0B" strokeWidth={2.3} />
             ) : (
-              <X size={18} color={colors.danger} strokeWidth={2.5} />
+              <X size={iconSize} color={colors.danger} strokeWidth={2.5} />
             )}
           </TouchableOpacity>
         )}
@@ -276,13 +281,15 @@ export const GreetingHeader: React.FC<GreetingHeaderProps> = React.memo(function
             style={[
               styles.iconBtn,
               {
+                width: iconBtnSize,
+                height: iconBtnSize,
                 backgroundColor: colors.surfaceSubtle,
                 borderColor: colors.surfaceBorder,
                 borderRadius: radii.chip,
               },
             ]}
           >
-            <Settings size={18} color={colors.textPrimary} />
+            <Settings size={iconSize} color={colors.textPrimary} />
           </TouchableOpacity>
         )}
       </View>

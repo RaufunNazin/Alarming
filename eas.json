@@ -6,10 +6,12 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "env": {
         "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
       },
@@ -19,6 +21,7 @@
     },
     "production": {
       "distribution": "internal",
+      "channel": "production",
       "env": {
         "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
       },

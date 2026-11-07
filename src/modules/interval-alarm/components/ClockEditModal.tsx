@@ -62,9 +62,10 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   onClose,
   onConfirm,
 }) => {
-  const { colors, typography, radii, shadows, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, formatTime12h: formatTime12hLocal } = useTranslation();
   const enableKeyboardTimeInput = useSettingsStore((s) => s.enableKeyboardTimeInput);
+  const actionBtnHeight = responsive.isCompact ? 42 : 48;
 
   const {
     translateY,
@@ -85,6 +86,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
   const [activeTimeTab, setActiveTimeTab] = useState<'start' | 'end'>('start');
   const [dialResetKey, setDialResetKey] = useState(0);
   const [isKeyboardMode, setIsKeyboardMode] = useState(false);
+  const [isDialDragging, setIsDialDragging] = useState(false);
   const [startHour, setStartHour] = useState(initialStartHour);
   const [startMinute, setStartMinute] = useState(initialStartMinute);
   const [endHour, setEndHour] = useState(initialEndHour);
@@ -100,6 +102,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
       setActiveTimeTab('start');
       setDialResetKey((k) => k + 1);
       setIsKeyboardMode(false);
+      setIsDialDragging(false);
       setStartHour(initialStartHour);
       setStartMinute(initialStartMinute);
       setEndHour(initialEndHour);
@@ -129,6 +132,13 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
     } else {
       setStartHour(hour);
       setStartMinute(minute);
+      if (alarmType !== 'interval' && !hideModeSwitcher) {
+        const windowSpan =
+          useSettingsStore.getState().defaultWindowDurationMinutes || 60;
+        const endTotal = (hour * 60 + minute + windowSpan) % (24 * 60);
+        setEndHour(Math.floor(endTotal / 60));
+        setEndMinute(endTotal % 60);
+      }
     }
   };
 
@@ -216,6 +226,8 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
           styles.modalContent,
           shadows.modal,
           {
+            maxWidth: responsive.modalMaxWidth,
+            alignSelf: 'center',
             backgroundColor: colors.background,
             borderColor: colors.surfaceBorder,
             borderTopLeftRadius: radii.modalOuter,
@@ -225,7 +237,16 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
         ]}
       >
         {/* Drag Handle Zone */}
-        <View {...dragHandlePanHandlers} style={styles.dragHandleZone}>
+        <View
+          {...dragHandlePanHandlers}
+          style={[
+            styles.dragHandleZone,
+            {
+              paddingTop: responsive.s(10),
+              paddingBottom: responsive.s(12),
+            },
+          ]}
+        >
           <View
             style={[
               styles.handleBar,
@@ -242,10 +263,14 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
 
         <ScrollView
           style={styles.scrollView}
+          scrollEnabled={!isDialDragging}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: responsive.s(14) },
+          ]}
         >
           {/* Alarm Type Switcher (Hidden when editing an individual sequence step) */}
           {!hideModeSwitcher && (
@@ -253,6 +278,8 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
               style={[
                 styles.segmentedType,
                 {
+                  marginHorizontal: responsive.screenPadding,
+                  marginBottom: responsive.s(12),
                   backgroundColor: colors.surface,
                   borderColor: colors.surfaceBorder,
                   borderRadius: radii.chip,
@@ -266,12 +293,25 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                     key={tab.key}
                     activeOpacity={0.8}
                     onPress={() => {
+                      if (
+                        tab.key === 'interval' &&
+                        endHour === startHour &&
+                        endMinute === startMinute
+                      ) {
+                        const windowSpan =
+                          useSettingsStore.getState().defaultWindowDurationMinutes || 60;
+                        const endTotal =
+                          (startHour * 60 + startMinute + windowSpan) % (24 * 60);
+                        setEndHour(Math.floor(endTotal / 60));
+                        setEndMinute(endTotal % 60);
+                      }
                       setAlarmType(tab.key);
                       setActiveTimeTab('start');
                       setDialResetKey((k) => k + 1);
                     }}
                     style={[
                       styles.typeSegment,
+                      { paddingVertical: responsive.s(8) },
                       isSelected && {
                         backgroundColor: colors.surfaceSubtle,
                         borderRadius: radii.chipInner,
@@ -282,6 +322,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                       style={[
                         styles.typeText,
                         {
+                          fontSize: responsive.ms(13),
                           color: isSelected ? colors.textPrimary : colors.textMuted,
                           fontFamily: typography.numbersBold,
                         },
@@ -301,25 +342,31 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             selectedMinute={currentDialMinute}
             onTimeChange={handleTimeChange}
             onMinuteSelectionComplete={handleMinuteSelectionComplete}
+            onDialDragStateChange={setIsDialDragging}
             resetKey={dialResetKey}
             isKeyboardMode={isKeyboardMode}
             liveDurationParts={liveRingParts}
           />
 
-          {/* Mode-Specific Controls Below Clock */}
-          {alarmType === 'interval' && (
-            <View style={styles.intervalTimesContainer}>
-              <View style={styles.intervalCardRow}>
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => handleSelectTimeTab('start')}
+          {/* Mode-Specific Controls Below Clock (Reserved height prevents modal jump between tabs) */}
+          {!hideModeSwitcher && (
+            <View
+              style={{
+                minHeight: responsive.s(68),
+                justifyContent: 'center',
+                marginHorizontal: responsive.screenPadding,
+                marginTop: responsive.s(12),
+              }}
+            >
+              {alarmType === 'single' && (
+                <View
                   style={[
                     styles.timeSelectorCard,
                     {
-                      backgroundColor:
-                        activeTimeTab === 'start' ? colors.surfaceSubtle : colors.surface,
-                      borderColor:
-                        activeTimeTab === 'start' ? colors.primary : colors.surfaceBorder,
+                      flex: 0,
+                      padding: responsive.s(12),
+                      backgroundColor: colors.surfaceSubtle,
+                      borderColor: colors.primary,
                       borderRadius: radii.cardInner,
                     },
                   ]}
@@ -327,122 +374,186 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
                   <Text
                     style={[
                       styles.timeCardLabel,
-                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(10.5),
+                        color: colors.textSecondary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
-                    {t.startTime.toUpperCase()}
+                    {t.modeSingle.toUpperCase()}
                   </Text>
                   <Text
                     style={[
                       styles.timeCardValue,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                      {
+                        fontSize: responsive.ms(15.5),
+                        color: colors.textPrimary,
+                        fontFamily: typography.numbersBold,
+                      },
                     ]}
                   >
                     {formatTime12hLocal(startHour, startMinute).full}
                   </Text>
-                </TouchableOpacity>
+                </View>
+              )}
 
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => handleSelectTimeTab('end')}
+              {alarmType === 'interval' && (
+                <View style={[styles.intervalCardRow, { gap: responsive.s(10) }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => handleSelectTimeTab('start')}
+                    style={[
+                      styles.timeSelectorCard,
+                      {
+                        padding: responsive.s(12),
+                        backgroundColor:
+                          activeTimeTab === 'start' ? colors.surfaceSubtle : colors.surface,
+                        borderColor:
+                          activeTimeTab === 'start' ? colors.primary : colors.surfaceBorder,
+                        borderRadius: radii.cardInner,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.timeCardLabel,
+                        {
+                          fontSize: responsive.ms(10.5),
+                          color: colors.textSecondary,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {t.startTime.toUpperCase()}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.timeCardValue,
+                        {
+                          fontSize: responsive.ms(15.5),
+                          color: colors.textPrimary,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {formatTime12hLocal(startHour, startMinute).full}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => handleSelectTimeTab('end')}
+                    style={[
+                      styles.timeSelectorCard,
+                      {
+                        padding: responsive.s(12),
+                        backgroundColor:
+                          activeTimeTab === 'end' ? colors.surfaceSubtle : colors.surface,
+                        borderColor:
+                          activeTimeTab === 'end' ? colors.primary : colors.surfaceBorder,
+                        borderRadius: radii.cardInner,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.timeCardLabel,
+                        {
+                          fontSize: responsive.ms(10.5),
+                          color: colors.textSecondary,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {t.endTime.toUpperCase()}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.timeCardValue,
+                        {
+                          fontSize: responsive.ms(15.5),
+                          color: colors.textPrimary,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {formatTime12hLocal(endHour, endMinute).full}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {alarmType === 'offset' && (
+                <View
                   style={[
-                    styles.timeSelectorCard,
+                    styles.offsetDirectionRow,
                     {
-                      backgroundColor:
-                        activeTimeTab === 'end' ? colors.surfaceSubtle : colors.surface,
-                      borderColor:
-                        activeTimeTab === 'end' ? colors.primary : colors.surfaceBorder,
-                      borderRadius: radii.cardInner,
+                      backgroundColor: colors.surface,
+                      borderColor: colors.surfaceBorder,
+                      borderRadius: radii.chip,
                     },
                   ]}
                 >
-                  <Text
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setOffsetDirection('before')}
                     style={[
-                      styles.timeCardLabel,
-                      { color: colors.textSecondary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {t.endTime.toUpperCase()}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.timeCardValue,
-                      { color: colors.textPrimary, fontFamily: typography.numbersBold },
-                    ]}
-                  >
-                    {formatTime12hLocal(endHour, endMinute).full}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {alarmType === 'offset' && (
-            <View style={styles.offsetOptionsContainer}>
-              <View
-                style={[
-                  styles.offsetDirectionRow,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.surfaceBorder,
-                    borderRadius: radii.chip,
-                  },
-                ]}
-              >
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => setOffsetDirection('before')}
-                  style={[
-                    styles.directionTab,
-                    offsetDirection === 'before' && {
-                      backgroundColor: colors.surfaceSubtle,
-                      borderRadius: radii.chipInner,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.directionTabText,
-                      {
-                        color:
-                          offsetDirection === 'before'
-                            ? colors.textPrimary
-                            : colors.textMuted,
-                        fontFamily: typography.numbersBold,
+                      styles.directionTab,
+                      { paddingVertical: responsive.s(9) },
+                      offsetDirection === 'before' && {
+                        backgroundColor: colors.surfaceSubtle,
+                        borderRadius: radii.chipInner,
                       },
                     ]}
                   >
-                    {t.before}
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.directionTabText,
+                        {
+                          fontSize: responsive.ms(12),
+                          color:
+                            offsetDirection === 'before'
+                              ? colors.textPrimary
+                              : colors.textMuted,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {t.before}
+                    </Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => setOffsetDirection('after')}
-                  style={[
-                    styles.directionTab,
-                    offsetDirection === 'after' && {
-                      backgroundColor: colors.surfaceSubtle,
-                      borderRadius: radii.chipInner,
-                    },
-                  ]}
-                >
-                  <Text
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setOffsetDirection('after')}
                     style={[
-                      styles.directionTabText,
-                      {
-                        color:
-                          offsetDirection === 'after'
-                            ? colors.textPrimary
-                            : colors.textMuted,
-                        fontFamily: typography.numbersBold,
+                      styles.directionTab,
+                      { paddingVertical: responsive.s(9) },
+                      offsetDirection === 'after' && {
+                        backgroundColor: colors.surfaceSubtle,
+                        borderRadius: radii.chipInner,
                       },
                     ]}
                   >
-                    {t.after}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                    <Text
+                      style={[
+                        styles.directionTabText,
+                        {
+                          fontSize: responsive.ms(12),
+                          color:
+                            offsetDirection === 'after'
+                              ? colors.textPrimary
+                              : colors.textMuted,
+                          fontFamily: typography.numbersBold,
+                        },
+                      ]}
+                    >
+                      {t.after}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
         </ScrollView>
@@ -452,6 +563,9 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
           style={[
             styles.bottomActionBar,
             {
+              paddingHorizontal: responsive.screenPadding,
+              paddingTop: responsive.s(10),
+              paddingBottom: responsive.modalBottomPadding,
               borderTopColor: colors.surfaceBorder,
               backgroundColor: colors.background,
             },
@@ -471,6 +585,8 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
               style={[
                 styles.bottomKeypadBtn,
                 {
+                  width: actionBtnHeight,
+                  height: actionBtnHeight,
                   backgroundColor: isKeyboardMode ? colors.primary + '25' : colors.surface,
                   borderColor: isKeyboardMode ? colors.primary : colors.surfaceBorder,
                   borderRadius: radii.button,
@@ -478,9 +594,12 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
               ]}
             >
               {isKeyboardMode ? (
-                <Clock size={20} color={colors.primary} />
+                <Clock size={Math.round(responsive.ms(19))} color={colors.primary} />
               ) : (
-                <KeyboardIcon size={20} color={colors.textSecondary} />
+                <KeyboardIcon
+                  size={Math.round(responsive.ms(19))}
+                  color={colors.textSecondary}
+                />
               )}
             </TouchableOpacity>
           )}
@@ -494,6 +613,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             style={[
               styles.bottomCancelBtn,
               {
+                height: actionBtnHeight,
                 backgroundColor: colors.surface,
                 borderColor: colors.surfaceBorder,
                 borderRadius: radii.button,
@@ -503,7 +623,11 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             <Text
               style={[
                 styles.bottomCancelBtnText,
-                { color: colors.textSecondary, fontFamily: typography.numbersBold },
+                {
+                  fontSize: responsive.ms(14.5),
+                  color: colors.textSecondary,
+                  fontFamily: typography.numbersBold,
+                },
               ]}
             >
               {t.cancel}
@@ -516,6 +640,7 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             style={[
               styles.bottomSaveBtn,
               {
+                height: actionBtnHeight,
                 backgroundColor: colors.textPrimary,
                 borderRadius: radii.button,
               },
@@ -524,7 +649,11 @@ export const ClockEditModal: React.FC<ClockEditModalProps> = ({
             <Text
               style={[
                 styles.bottomSaveBtnText,
-                { color: colors.textOnPrimary, fontFamily: typography.numbersBold },
+                {
+                  fontSize: responsive.ms(14.5),
+                  color: colors.textOnPrimary,
+                  fontFamily: typography.numbersBold,
+                },
               ]}
             >
               {t.selectTime}

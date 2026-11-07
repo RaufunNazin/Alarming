@@ -25,6 +25,7 @@ import { useTranslation } from '../../../core/i18n/translations';
 import { AlarmItem } from '../types';
 import {
   formatAlarmTimeDisplay,
+  formatPauseStatusBadge,
   formatSkippedDateLabel,
   getAlarmSteps,
   getSmartScheduleString,
@@ -55,7 +56,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   onDuplicate,
   onToggleSkipNext,
 }) {
-  const { colors, typography, radii, shadows, spacing, themeMode } = useTheme();
+  const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
   const { t, language } = useTranslation();
 
   const [showQuickMenu, setShowQuickMenu] = useState(false);
@@ -96,8 +97,13 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
     [translateX]
   );
 
-  const isPausedFor24h = Boolean(alarm.pausedUntil && alarm.pausedUntil > Date.now());
-  const isEffectivelyEnabled = alarm.isEnabled && !isPausedFor24h;
+  const pauseStatusBadgeText = useMemo(
+    () => formatPauseStatusBadge(alarm),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [alarm, language, nowMinuteKey]
+  );
+  const isPausedOrDismissedToday = Boolean(pauseStatusBadgeText);
+  const isEffectivelyEnabled = alarm.isEnabled && !isPausedOrDismissedToday;
 
   const scheduleStr = useMemo(
     () => getSmartScheduleString(alarm),
@@ -174,6 +180,8 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
       onPanResponderTerminate: () => {
         springToZero();
       },
+      onPanResponderTerminationRequest: (_, gestureState) =>
+        Math.abs(gestureState.dx) < 24,
     })
   ).current;
 
@@ -190,6 +198,12 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   const renderModeSubtitle = () => {
     if (alarm.type === 'single') return null;
 
+    const totalCustomSteps = alarm.customSteps?.length ?? 0;
+    const countLabel =
+      totalCustomSteps > 0 && stepsCount < totalCustomSteps
+        ? t.alarmsActiveOfTotal(stepsCount, totalCustomSteps)
+        : t.alarmsCountSummary(stepsCount);
+
     if (alarm.isEscalating) {
       const badgeLabel =
         alarm.type === 'offset'
@@ -199,17 +213,18 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
           : t.escalatingBadge;
       return (
         <View style={styles.modeSubRow}>
-          <Flame size={12} color={colors.primary} />
+          <Flame size={Math.round(responsive.ms(12))} color={colors.primary} />
           <Text
             style={[
               styles.modeSubText,
               {
+                fontSize: responsive.ms(12),
                 color: isEffectivelyEnabled ? colors.primaryLight : colors.textMuted,
                 fontFamily: typography.sansMedium,
               },
             ]}
           >
-            {badgeLabel} • {t.alarmsCountSummary(stepsCount)}
+            {badgeLabel} • {countLabel}
           </Text>
         </View>
       );
@@ -228,12 +243,13 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
           style={[
             styles.modeSubText,
             {
+              fontSize: responsive.ms(12),
               color: isEffectivelyEnabled ? colors.textSecondary : colors.textMuted,
               fontFamily: typography.sansRegular,
             },
           ]}
         >
-          {modeDesc} • {t.alarmsCountSummary(stepsCount)}
+          {modeDesc} • {countLabel}
         </Text>
       </View>
     );
@@ -242,8 +258,8 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
   return (
     <Animated.View
       style={{
-        marginHorizontal: spacing.lg,
-        marginVertical: 6,
+        marginHorizontal: responsive.screenPadding,
+        marginVertical: responsive.s(5.5),
         opacity: cardOpacity,
       }}
     >
@@ -270,11 +286,15 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
               },
             ]}
           >
-            <Edit3 size={18} color={colors.accent} />
+            <Edit3 size={Math.round(responsive.ms(18))} color={colors.accent} />
             <Text
               style={[
                 styles.swipeActionLabel,
-                { color: colors.accent, fontFamily: typography.sansBold },
+                {
+                  fontSize: responsive.ms(13),
+                  color: colors.accent,
+                  fontFamily: typography.sansBold,
+                },
               ]}
             >
               {t.swipeEditBtn}
@@ -297,12 +317,16 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
               <Text
                 style={[
                   styles.swipeActionLabel,
-                  { color: colors.danger, fontFamily: typography.sansBold },
+                  {
+                    fontSize: responsive.ms(13),
+                    color: colors.danger,
+                    fontFamily: typography.sansBold,
+                  },
                 ]}
               >
                 {t.swipeDeleteBtn}
               </Text>
-              <Trash2 size={18} color={colors.danger} />
+              <Trash2 size={Math.round(responsive.ms(18))} color={colors.danger} />
             </Animated.View>
           )}
         </View>
@@ -319,28 +343,33 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 ? colors.cardOnBorder
                 : colors.cardOffBorder,
               borderRadius: radii.cardOuter,
-              paddingVertical: 18,
-              paddingHorizontal: 18,
               opacity: themeMode === 'dark' ? (isEffectivelyEnabled ? 1 : 0.65) : 1,
               transform: [{ translateX }],
             },
           ]}
         >
-          <View style={styles.contentRow}>
-            {/* Left Info Column (Pressable to open Edit Modal, Long-press for Quick Actions) */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={handleCardPress}
-              onLongPress={handleCardLongPress}
-              delayLongPress={320}
-              style={styles.infoColPressable}
-            >
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={handleCardPress}
+            onLongPress={handleCardLongPress}
+            delayLongPress={320}
+            style={[
+              styles.contentRow,
+              {
+                paddingVertical: responsive.cardPadding,
+                paddingHorizontal: responsive.cardPadding,
+              },
+            ]}
+          >
+            {/* Left Info Column */}
+            <View style={[styles.infoColPressable, { paddingRight: responsive.s(12) }]}>
               {/* Top row: Schedule • Label • Category Tag */}
               <View style={styles.topInfoRow}>
                 <Text
                   style={[
                     styles.scheduleText,
                     {
+                      fontSize: responsive.ms(13),
                       color: isEffectivelyEnabled ? colors.textPrimary : colors.textMuted,
                       fontFamily: typography.numbersBold,
                     },
@@ -353,7 +382,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                     <Text
                       style={[
                         styles.separatorDot,
-                        { color: colors.textMuted },
+                        { fontSize: responsive.ms(13), color: colors.textMuted },
                       ]}
                     >
                       •
@@ -362,6 +391,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       style={[
                         styles.labelText,
                         {
+                          fontSize: responsive.ms(13),
                           color: isEffectivelyEnabled
                             ? colors.textSecondary
                             : colors.textMuted,
@@ -383,14 +413,20 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                         backgroundColor: colors.accentSoft,
                         borderColor: colors.accent + '45',
                         borderRadius: radii.chip,
+                        paddingHorizontal: responsive.s(7),
+                        paddingVertical: responsive.s(2),
                       },
                     ]}
                   >
-                    <Tag size={10} color={colors.accent} />
+                    <Tag size={Math.round(responsive.ms(10))} color={colors.accent} />
                     <Text
                       style={[
                         styles.categoryPillText,
-                        { color: colors.accent, fontFamily: typography.sansBold },
+                        {
+                          fontSize: responsive.ms(10.5),
+                          color: colors.accent,
+                          fontFamily: typography.sansBold,
+                        },
                       ]}
                     >
                       {alarm.category}
@@ -404,8 +440,8 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 style={[
                   styles.largeTimeText,
                   {
-                    fontSize: 22,
-                    lineHeight: 28,
+                    fontSize: responsive.ms(22),
+                    lineHeight: responsive.ms(27),
                     color: isEffectivelyEnabled ? colors.textPrimary : colors.textMuted,
                     fontFamily: typography.numbersBold,
                   },
@@ -414,16 +450,34 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 adjustsFontSizeToFit
                 minimumFontScale={0.75}
               >
-                {timeDisplay}
+                {timeDisplay.split(/(AM|PM|এএম|পিএম)/g).map((part, idx) =>
+                  part === 'AM' || part === 'PM' || part === 'এএম' || part === 'পিএম' ? (
+                    <Text
+                      key={idx}
+                      style={{
+                        fontSize: responsive.ms(13.5),
+                        color: isEffectivelyEnabled
+                          ? colors.textSecondary
+                          : colors.textMuted,
+                        fontFamily: typography.sansMedium,
+                      }}
+                    >
+                      {part}
+                    </Text>
+                  ) : (
+                    part
+                  )
+                )}
               </Text>
 
               {renderModeSubtitle()}
 
-              {/* 24-Hour Paused Visible Indicator */}
-              {isPausedFor24h ? (
+              {/* Paused / Dismissed for Today Status Badge (Style B) */}
+              {pauseStatusBadgeText ? (
                 <TouchableOpacity
                   activeOpacity={0.75}
-                  onPress={() => {
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
                     safeHaptics.selectionAsync();
                     handleToggle();
                   }}
@@ -433,26 +487,34 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       backgroundColor: 'rgba(245, 158, 11, 0.14)',
                       borderColor: 'rgba(245, 158, 11, 0.40)',
                       borderRadius: radii.chip,
+                      paddingHorizontal: responsive.s(8),
+                      paddingVertical: responsive.s(3.5),
+                      marginTop: responsive.s(6),
                     },
                   ]}
                 >
-                  <Power size={11} color="#F59E0B" />
+                  <Power size={Math.round(responsive.ms(11))} color="#F59E0B" />
                   <Text
                     style={[
                       styles.skipBadgeText,
-                      { color: '#F59E0B', fontFamily: typography.sansBold },
+                      {
+                        fontSize: responsive.ms(11),
+                        color: '#F59E0B',
+                        fontFamily: typography.sansBold,
+                      },
                     ]}
                   >
-                    {t.pausedFor24hBadge}
+                    {pauseStatusBadgeText}
                   </Text>
                 </TouchableOpacity>
               ) : null}
 
               {/* Skip Next Occurrence Visible Indicator */}
-              {alarm.skipNextDate ? (
+              {alarm.isEnabled && alarm.skipNextDate ? (
                 <TouchableOpacity
                   activeOpacity={0.75}
-                  onPress={() => {
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
                     safeHaptics.selectionAsync();
                     onToggleSkipNext?.(alarm.id);
                   }}
@@ -462,21 +524,28 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       backgroundColor: 'rgba(245, 158, 11, 0.14)',
                       borderColor: 'rgba(245, 158, 11, 0.40)',
                       borderRadius: radii.chip,
+                      paddingHorizontal: responsive.s(8),
+                      paddingVertical: responsive.s(3.5),
+                      marginTop: responsive.s(6),
                     },
                   ]}
                 >
-                  <CalendarOff size={11} color="#F59E0B" />
+                  <CalendarOff size={Math.round(responsive.ms(11))} color="#F59E0B" />
                   <Text
                     style={[
                       styles.skipBadgeText,
-                      { color: '#F59E0B', fontFamily: typography.sansBold },
+                      {
+                        fontSize: responsive.ms(11),
+                        color: '#F59E0B',
+                        fontFamily: typography.sansBold,
+                      },
                     ]}
                   >
                     {t.skippingNextPrefix} {formatSkippedDateLabel(alarm.skipNextDate)}
                   </Text>
                 </TouchableOpacity>
               ) : null}
-            </TouchableOpacity>
+            </View>
 
             {/* Right Sibling: Squircle Toggle Button */}
             <View style={styles.toggleWrapper}>
@@ -485,7 +554,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 onToggle={handleToggle}
               />
             </View>
-          </View>
+          </TouchableOpacity>
         </Animated.View>
       </View>
 
@@ -519,6 +588,12 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 styles.quickSheet,
                 shadows.modal,
                 {
+                  maxWidth: responsive.modalMaxWidth,
+                  alignSelf: 'center',
+                  paddingHorizontal: responsive.s(20),
+                  paddingTop: responsive.s(12),
+                  paddingBottom: responsive.modalBottomPadding + 8,
+                  gap: responsive.s(9),
                   backgroundColor: colors.modalSurface,
                   borderColor: colors.surfaceBorder,
                   borderTopLeftRadius: radii.modalOuter,
@@ -542,7 +617,11 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                     <Text
                       style={[
                         styles.quickTitle,
-                        { color: colors.textPrimary, fontFamily: typography.numbersBold },
+                        {
+                          fontSize: responsive.ms(20),
+                          color: colors.textPrimary,
+                          fontFamily: typography.numbersBold,
+                        },
                       ]}
                     >
                       {timeDisplay}
@@ -551,6 +630,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                       style={[
                         styles.quickSubtitle,
                         {
+                          fontSize: responsive.ms(13),
                           color: colors.textSecondary,
                           fontFamily: typography.sansRegular,
                         },
@@ -563,7 +643,7 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
               </View>
 
               {/* Skip / Resume Next Occurrence */}
-              {onToggleSkipNext && (
+              {onToggleSkipNext && alarm.isEnabled && (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => {
@@ -574,6 +654,8 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   style={[
                     styles.quickOptionRow,
                     {
+                      paddingVertical: responsive.s(12),
+                      paddingHorizontal: responsive.s(14),
                       backgroundColor: colors.surfaceSubtle,
                       borderColor: colors.surfaceBorder,
                       borderRadius: radii.button,
@@ -581,14 +663,18 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   ]}
                 >
                   {alarm.skipNextDate ? (
-                    <CalendarCheck size={18} color={colors.accent} />
+                    <CalendarCheck size={Math.round(responsive.ms(18))} color={colors.accent} />
                   ) : (
-                    <CalendarOff size={18} color="#F59E0B" />
+                    <CalendarOff size={Math.round(responsive.ms(18))} color="#F59E0B" />
                   )}
                   <Text
                     style={[
                       styles.quickOptionText,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      {
+                        fontSize: responsive.ms(14),
+                        color: colors.textPrimary,
+                        fontFamily: typography.sansMedium,
+                      },
                     ]}
                   >
                     {alarm.skipNextDate ? t.resumeNextBtn : t.skipNextBtn}
@@ -608,17 +694,23 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   style={[
                     styles.quickOptionRow,
                     {
+                      paddingVertical: responsive.s(12),
+                      paddingHorizontal: responsive.s(14),
                       backgroundColor: colors.surfaceSubtle,
                       borderColor: colors.surfaceBorder,
                       borderRadius: radii.button,
                     },
                   ]}
                 >
-                  <Copy size={18} color={colors.accent} />
+                  <Copy size={Math.round(responsive.ms(18))} color={colors.accent} />
                   <Text
                     style={[
                       styles.quickOptionText,
-                      { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                      {
+                        fontSize: responsive.ms(14),
+                        color: colors.textPrimary,
+                        fontFamily: typography.sansMedium,
+                      },
                     ]}
                   >
                     {t.duplicateAlarmBtn}
@@ -637,17 +729,23 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                 style={[
                   styles.quickOptionRow,
                   {
+                    paddingVertical: responsive.s(12),
+                    paddingHorizontal: responsive.s(14),
                     backgroundColor: colors.surfaceSubtle,
                     borderColor: colors.surfaceBorder,
                     borderRadius: radii.button,
                   },
                 ]}
               >
-                <Edit3 size={18} color={colors.textPrimary} />
+                <Edit3 size={Math.round(responsive.ms(18))} color={colors.textPrimary} />
                 <Text
                   style={[
                     styles.quickOptionText,
-                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
+                    {
+                      fontSize: responsive.ms(14),
+                      color: colors.textPrimary,
+                      fontFamily: typography.sansMedium,
+                    },
                   ]}
                 >
                   {t.swipeEditBtn}
@@ -665,17 +763,23 @@ export const AlarmCardItem: React.FC<AlarmCardItemProps> = React.memo(function A
                   style={[
                     styles.quickOptionRow,
                     {
+                      paddingVertical: responsive.s(12),
+                      paddingHorizontal: responsive.s(14),
                       backgroundColor: 'rgba(239, 68, 68, 0.12)',
                       borderColor: 'rgba(239, 68, 68, 0.30)',
                       borderRadius: radii.button,
                     },
                   ]}
                 >
-                  <Trash2 size={18} color={colors.danger} />
+                  <Trash2 size={Math.round(responsive.ms(18))} color={colors.danger} />
                   <Text
                     style={[
                       styles.quickOptionText,
-                      { color: colors.danger, fontFamily: typography.sansBold },
+                      {
+                        fontSize: responsive.ms(14),
+                        color: colors.danger,
+                        fontFamily: typography.sansBold,
+                      },
                     ]}
                   >
                     {t.swipeDeleteBtn}

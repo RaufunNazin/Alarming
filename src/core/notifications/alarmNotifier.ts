@@ -165,11 +165,31 @@ export async function initializeAlarmNotifications(): Promise<void> {
       }
     }
 
-    // Set up interactive lock-screen action buttons
+    // Set up interactive lock-screen action buttons localized to current language
+    await registerNotificationCategories(useSettingsStore.getState().language);
+  } catch (error) {
+    console.warn('Failed to initialize notifications:', error);
+  }
+}
+
+/**
+ * Registers or updates OS notification categories with localized button titles.
+ */
+export async function registerNotificationCategories(
+  lang: 'en' | 'bn' = useSettingsStore.getState().language
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  const stopTitle = lang === 'bn' ? 'বন্ধ করুন' : 'Stop';
+  const snoozeTitle = lang === 'bn' ? 'স্নুজ' : 'Snooze';
+  const stopAllTodayTitle = lang === 'bn' ? 'আজকের সব বন্ধ' : 'Stop All Today';
+  const dismissTitle = lang === 'bn' ? 'বন্ধ করুন' : 'Dismiss';
+
+  try {
     await Notifications.setNotificationCategoryAsync(INTERVAL_CATEGORY_ID, [
       {
         identifier: ACTION_DISMISS_SINGLE,
-        buttonTitle: 'Stop',
+        buttonTitle: stopTitle,
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -177,7 +197,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
       },
       {
         identifier: ACTION_SNOOZE_NEXT,
-        buttonTitle: 'Snooze',
+        buttonTitle: snoozeTitle,
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -185,7 +205,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
       },
       {
         identifier: ACTION_DISMISS_ALL,
-        buttonTitle: 'Stop All Today',
+        buttonTitle: stopAllTodayTitle,
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -196,7 +216,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
     await Notifications.setNotificationCategoryAsync(SINGLE_CATEGORY_ID, [
       {
         identifier: ACTION_DISMISS_SINGLE,
-        buttonTitle: 'Dismiss',
+        buttonTitle: dismissTitle,
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -204,7 +224,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
       },
       {
         identifier: ACTION_SNOOZE_SINGLE,
-        buttonTitle: 'Snooze',
+        buttonTitle: snoozeTitle,
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -212,7 +232,7 @@ export async function initializeAlarmNotifications(): Promise<void> {
       },
     ]);
   } catch (error) {
-    console.warn('Failed to initialize notifications:', error);
+    console.warn('Failed to register notification categories:', error);
   }
 }
 
@@ -305,7 +325,7 @@ export async function scheduleAlarmsForAlarmItem(alarm: AlarmItem): Promise<stri
 
           try {
             const lang = useSettingsStore.getState().language;
-            const defaultAlarmLabel = lang === 'bn' ? 'অ্যালার্ম' : 'Alarm';
+            const defaultAlarmLabel = lang === 'bn' ? 'সময় হয়েছে!' : "Time's up!";
             const singleBody =
               lang === 'bn'
                 ? `${formatNumberLocalized(step.timeString, 'bn')} — ঘুম থেকে ওঠার সময় হয়েছে`
@@ -425,7 +445,7 @@ export async function scheduleSnoozeNotification(
   return enqueueNotificationTask(async () => {
     try {
       const lang = useSettingsStore.getState().language;
-      const defaultLabel = lang === 'bn' ? 'অ্যালার্ম' : 'Alarm';
+      const defaultLabel = lang === 'bn' ? 'সময় হয়েছে!' : "Time's up!";
       const snoozedSuffix = lang === 'bn' ? '(স্নুজ)' : '(Snoozed)';
       const snoozeBody =
         lang === 'bn' ? 'আবার ঘুম থেকে ওঠার সময় হয়েছে' : 'Time to wake up gently';

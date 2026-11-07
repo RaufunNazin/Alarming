@@ -65,4 +65,5 @@ export interface ActiveRingingAlarm {
   currentStepIndex?: number;
   totalSteps?: number;
   currentTimeString: string;
+  cycleDateStr?: string;
 }
