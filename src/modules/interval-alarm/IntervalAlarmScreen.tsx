@@ -12,10 +12,14 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Updates from 'expo-updates';
 import { Plus, Bell, Zap, Sun, Tag, Power, Check } from 'lucide-react-native';
 import { useTheme } from '../../core/theme';
 import { useSettingsStore } from '../../core/settings/settingsStore';
-import { useTranslation } from '../../core/i18n/translations';
+import {
+  useTranslation,
+  formatUpdateTimestampLocalized,
+} from '../../core/i18n/translations';
 import { useAlarmStore } from './store/alarmStore';
 import { AlarmItem } from './types';
 import {
@@ -58,6 +62,17 @@ export const IntervalAlarmScreen: React.FC = () => {
   const dismissUpcomingToday = useAlarmStore((s) => s.dismissUpcomingToday);
   const toggleCategoryAlarms = useAlarmStore((s) => s.toggleCategoryAlarms);
   const toggleAlarm = useAlarmStore((s) => s.toggleAlarm);
+  const whatsNewModalVisible = useAlarmStore((s) => s.whatsNewModalVisible);
+  const setWhatsNewModalVisible = useAlarmStore((s) => s.setWhatsNewModalVisible);
+  const lastUpdatedAt = useAlarmStore((s) => s.lastUpdatedAt);
+
+  const currentVersion = Updates.runtimeVersion || '1.0.0';
+  const formattedUpdatedAt = formatUpdateTimestampLocalized(
+    (Updates.createdAt ? Updates.createdAt.getTime() : null) ||
+      lastUpdatedAt ||
+      Date.now(),
+    language
+  );
 
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState<AlarmItem | null>(null);
@@ -80,6 +95,9 @@ export const IntervalAlarmScreen: React.FC = () => {
   const cancelPowerNapGesture = useSheetModalGesture(
     cancelPowerNapModalVisible,
     () => setCancelPowerNapModalVisible(false)
+  );
+  const whatsNewGesture = useSheetModalGesture(whatsNewModalVisible, () =>
+    setWhatsNewModalVisible(false)
   );
 
   useEffect(() => {
@@ -1204,6 +1222,185 @@ export const IntervalAlarmScreen: React.FC = () => {
           onClose={handleCloseSettingsModal}
         />
 
+        {/* Major Version Update Changelog Modal (Automatically shown on version upgrade) */}
+        {whatsNewModalVisible && (
+          <Modal
+            visible={true}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setWhatsNewModalVisible(false)}
+          >
+            <View style={styles.sheetModalBackdrop}>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    backgroundColor: colors.overlayBackdrop,
+                    opacity: whatsNewGesture.backdropOpacity,
+                  },
+                ]}
+              />
+              <Pressable
+                style={styles.backdropDismissArea}
+                onPress={() => setWhatsNewModalVisible(false)}
+              />
+              <Animated.View
+                onLayout={whatsNewGesture.onSheetLayout}
+                {...whatsNewGesture.sheetPanHandlers}
+                style={[
+                  styles.confirmSheet,
+                  shadows.modal,
+                  {
+                    maxHeight: '84%',
+                    maxWidth: responsive.modalMaxWidth,
+                    alignSelf: 'center',
+                    paddingHorizontal: responsive.screenPadding,
+                    paddingTop: responsive.s(12),
+                    paddingBottom: responsive.modalBottomPadding + 8,
+                    backgroundColor: colors.modalSurface,
+                    borderColor: colors.surfaceBorder,
+                    borderTopLeftRadius: radii.modalOuter,
+                    borderTopRightRadius: radii.modalOuter,
+                    transform: [{ translateY: whatsNewGesture.translateY }],
+                  },
+                ]}
+              >
+                <View {...whatsNewGesture.dragHandlePanHandlers}>
+                  <View
+                    style={[
+                      styles.sheetDragHandle,
+                      {
+                        backgroundColor: colors.surfaceBorder,
+                        borderRadius: radii.handle,
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.confirmTitle,
+                      {
+                        fontSize: responsive.ms(18),
+                        marginBottom: 4,
+                        color: colors.textPrimary,
+                        fontFamily: typography.sansBold,
+                      },
+                    ]}
+                  >
+                    {t.whatsNewModalTitle(currentVersion)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: responsive.ms(12),
+                      marginBottom: 6,
+                      color: colors.primaryLight,
+                      fontFamily: typography.sansMedium,
+                    }}
+                  >
+                    {t.lastUpdatedBadge(formattedUpdatedAt)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.confirmBody,
+                      {
+                        fontSize: responsive.ms(13),
+                        lineHeight: responsive.ms(19),
+                        marginBottom: 14,
+                        color: colors.textSecondary,
+                        fontFamily: typography.sansRegular,
+                      },
+                    ]}
+                  >
+                    {t.changelogModalSub}
+                  </Text>
+                </View>
+
+                <ScrollView
+                  style={{ flexGrow: 0, flexShrink: 1 }}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled
+                >
+                  {t.changelogSectionsV100.map((sec, idx) => (
+                    <View
+                      key={idx}
+                      style={[
+                        styles.whatsNewSectionCard,
+                        {
+                          backgroundColor: colors.surfaceSubtle,
+                          borderColor: colors.surfaceBorder,
+                          borderRadius: radii.cardInner,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.whatsNewSectionTitle,
+                          { color: colors.textPrimary, fontFamily: typography.sansBold },
+                        ]}
+                      >
+                        {sec.title}
+                      </Text>
+                      {sec.items.map((item, i) => (
+                        <View key={i} style={styles.whatsNewBulletRow}>
+                          <View
+                            style={[
+                              styles.whatsNewBulletDot,
+                              { backgroundColor: colors.primary },
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.whatsNewBulletText,
+                              {
+                                color: colors.textSecondary,
+                                fontFamily: typography.sansRegular,
+                              },
+                            ]}
+                          >
+                            {item}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </ScrollView>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    safeHaptics.selectionAsync();
+                    setWhatsNewModalVisible(false);
+                  }}
+                  style={[
+                    styles.confirmBtn,
+                    {
+                      flex: 0,
+                      marginTop: 10,
+                      paddingVertical: responsive.s(13),
+                      backgroundColor: colors.textPrimary,
+                      borderColor: colors.textPrimary,
+                      borderRadius: radii.button,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.confirmBtnText,
+                      {
+                        fontSize: responsive.ms(14),
+                        color: colors.textOnPrimary,
+                        fontFamily: typography.sansBold,
+                      },
+                    ]}
+                  >
+                    {t.done}
+                  </Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          </Modal>
+        )}
+
         {/* Active Ringing Overlay with Dismiss All Remaining */}
         <AlarmRingingOverlay />
 
@@ -1457,5 +1654,31 @@ const styles = StyleSheet.create({
   },
   confirmBtnText: {
     fontSize: 14,
+  },
+  whatsNewSectionCard: {
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+  },
+  whatsNewSectionTitle: {
+    fontSize: 13.5,
+    marginBottom: 6,
+  },
+  whatsNewBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 4,
+  },
+  whatsNewBulletDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    marginTop: 6,
+  },
+  whatsNewBulletText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
 });

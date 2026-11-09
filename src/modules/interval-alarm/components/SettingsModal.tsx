@@ -39,8 +39,13 @@ import {
   IntervalModeType,
   VolumeButtonAction,
 } from '../../../core/settings/settingsStore';
+import { AlarmStorage } from '../../../core/storage/alarmStorage';
 import { useAlarmStore } from '../store/alarmStore';
-import { useTranslation } from '../../../core/i18n/translations';
+import {
+  useTranslation,
+  formatUpdateTimestampLocalized,
+} from '../../../core/i18n/translations';
+import { AlarmToastBanner } from './AlarmToastBanner';
 import { useSheetModalGesture } from './useSheetModalGesture';
 import { safeHaptics } from '../../../core/haptics/safeHaptics';
 
@@ -56,13 +61,25 @@ const useNativeDriver = Platform.OS !== 'web';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const { colors, typography, radii, shadows, themeMode, responsive } = useTheme();
-  const { t, formatNum } = useTranslation();
+  const { t, language, formatNum } = useTranslation();
 
   const settings = useSettingsStore();
   const { updateSettings, addCategory, removeCategory, resetSettings } = settings;
   const clearCategoryFromAlarms = useAlarmStore((s) => s.clearCategoryFromAlarms);
   const retainOnlyCategoriesOnAlarms = useAlarmStore((s) => s.retainOnlyCategoriesOnAlarms);
   const showToast = useAlarmStore((s) => s.showToast);
+  const lastUpdatedAt = useAlarmStore((s) => s.lastUpdatedAt);
+  const setLastUpdatedAt = useAlarmStore((s) => s.setLastUpdatedAt);
+
+  const currentVersion = Updates.runtimeVersion || '1.0.0';
+  const effectiveUpdatedAtMs =
+    (Updates.createdAt ? Updates.createdAt.getTime() : null) ||
+    lastUpdatedAt ||
+    Date.now();
+  const formattedUpdatedAt = formatUpdateTimestampLocalized(
+    effectiveUpdatedAtMs,
+    language
+  );
 
   const isLight = themeMode === 'light';
   const sheetBg = isLight ? colors.background : colors.surface;
@@ -107,22 +124,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
   const handleCheckForUpdates = async () => {
     if (isCheckingUpdate) return;
     safeHaptics.selectionAsync();
-    if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled) {
-      showToast(t.updateDevModeToast);
-      return;
-    }
     try {
       setIsCheckingUpdate(true);
-      const update = await Updates.checkForUpdateAsync();
+      const minWait = new Promise((resolve) => setTimeout(resolve, 650));
+
+      if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled) {
+        await minWait;
+        showToast(
+          t.updateLatestWithTimeToast(currentVersion, formattedUpdatedAt),
+          undefined,
+          undefined,
+          true
+        );
+        setChangelogVisible(true);
+        return;
+      }
+
+      const [update] = await Promise.all([Updates.checkForUpdateAsync(), minWait]);
       if (update.isAvailable) {
-        showToast(t.updateDownloadingToast);
+        showToast(t.updateDownloadingToast, undefined, undefined, true);
         await Updates.fetchUpdateAsync();
+        const nowTs = Date.now();
+        setLastUpdatedAt(nowTs);
+        await AlarmStorage.saveUpdateMeta({
+          lastSeenVersion: currentVersion,
+          lastSeenUpdateId: Updates.updateId || null,
+          lastUpdatedAt: nowTs,
+          pendingOtaToast: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
         await Updates.reloadAsync();
       } else {
-        showToast(t.updateLatestToast);
+        showToast(
+          t.updateLatestWithTimeToast(currentVersion, formattedUpdatedAt),
+          undefined,
+          undefined,
+          true
+        );
+        setChangelogVisible(true);
       }
     } catch {
-      showToast(t.updateErrorToast);
+      showToast(t.updateErrorToast, undefined, undefined, true);
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -1590,7 +1632,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 void handleCheckForUpdates();
               }}
               style={[
-                styles.sourceCodeBtn,
+                styles.updateCardBtn,
                 {
                   marginTop: 18,
                   backgroundColor: cardBg,
@@ -1600,34 +1642,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 },
               ]}
             >
-              <RefreshCw size={16} color={colors.primary} />
-              <Text
-                style={[
-                  styles.sourceCodeBtnText,
-                  { color: colors.textPrimary, fontFamily: typography.sansMedium },
-                ]}
-              >
-                {isCheckingUpdate ? t.checkingUpdatesBtn : t.checkForUpdatesBtn}
-              </Text>
-              <View
-                style={[
-                  styles.versionPill,
-                  {
-                    backgroundColor: colors.primaryMuted,
-                    borderColor: colors.primary + '55',
-                    borderRadius: radii.chip,
-                  },
-                ]}
-              >
+              <View style={styles.updateCardRow}>
+                <RefreshCw size={16} color={colors.primary} />
                 <Text
                   style={[
-                    styles.versionPillText,
-                    { color: colors.primaryLight, fontFamily: typography.numbersBold },
+                    styles.sourceCodeBtnText,
+                    { color: colors.textPrimary, fontFamily: typography.sansMedium },
                   ]}
                 >
-                  v{formatNum('1.0.0')}
+                  {isCheckingUpdate ? t.checkingUpdatesBtn : t.checkForUpdatesBtn}
                 </Text>
+                <View
+                  style={[
+                    styles.versionPill,
+                    {
+                      backgroundColor: colors.primaryMuted,
+                      borderColor: colors.primary + '55',
+                      borderRadius: radii.chip,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.versionPillText,
+                      { color: colors.primaryLight, fontFamily: typography.numbersBold },
+                    ]}
+                  >
+                    v{formatNum(currentVersion)}
+                  </Text>
+                </View>
               </View>
+              <Text
+                style={[
+                  styles.updateCardSubText,
+                  { color: colors.textSecondary, fontFamily: typography.sansRegular },
+                ]}
+              >
+                {t.updateCardSubtitle(currentVersion, formattedUpdatedAt)}
+              </Text>
             </TouchableOpacity>
 
             {/* Changelog (v1.0.0) Button */}
@@ -2005,7 +2057,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                   setResetConfirmVisible(false);
                   void resetSettings();
                   void retainOnlyCategoriesOnAlarms(DEFAULT_ALARM_CATEGORIES);
-                  showToast(t.resetSettingsToast);
+                  showToast(t.resetSettingsToast, undefined, undefined, true);
                 }}
                 style={[
                   styles.confirmActionBtn,
@@ -2084,6 +2136,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
                 ]}
               >
                 {t.changelogModalTitle}
+              </Text>
+              <Text
+                style={[
+                  styles.changelogUpdatedBadgeText,
+                  { color: colors.primaryLight, fontFamily: typography.sansMedium },
+                ]}
+              >
+                {t.lastUpdatedBadge(formattedUpdatedAt)}
               </Text>
               <Text
                 style={[
@@ -2171,6 +2231,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
           </Animated.View>
         </View>
       )}
+
+      {/* Toast Banner mounted inside SettingsModal so update/settings toasts render above the modal */}
+      <AlarmToastBanner
+        bottomOffset={responsive.modalBottomPadding + 16}
+        horizontalMargin={responsive.screenPadding}
+      />
     </Modal>
   );
 };
@@ -2411,6 +2477,29 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 10,
     gap: 8,
+  },
+  updateCardBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    marginTop: 10,
+    gap: 4,
+  },
+  updateCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  updateCardSubText: {
+    fontSize: 11.5,
+    textAlign: 'center',
+  },
+  changelogUpdatedBadgeText: {
+    fontSize: 12,
+    marginBottom: 4,
   },
   sourceCodeBtnText: {
     fontSize: 14,

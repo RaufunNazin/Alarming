@@ -2,8 +2,11 @@ const {
   withAndroidManifest,
   withMainActivity,
   withMainApplication,
+  withGradleProperties,
+  withAppBuildGradle,
   withDangerousMod,
   withFinalizedMod,
+  AndroidConfig,
 } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
@@ -1086,9 +1089,77 @@ function withAndroidAlarmFiles(config) {
       // Write layered adaptive clock icon XMLs
       writeDynamicClockIconXmls(resDir);
 
+      // Ensure custom native classes and notification receivers are kept when R8 minification is enabled
+      const proguardPath = path.join(platformRoot, 'app/proguard-rules.pro');
+      const keepRules = `\n# [Alarming] Keep custom native alarm & widget classes from R8 stripping/obfuscation\n-keep class com.alarming.app.** { *; }\n-keep class expo.modules.notifications.** { *; }\n`;
+      if (fs.existsSync(proguardPath)) {
+        const currentProguard = fs.readFileSync(proguardPath, 'utf8');
+        if (!currentProguard.includes('com.alarming.app.**')) {
+          fs.writeFileSync(proguardPath, currentProguard + keepRules, 'utf8');
+        }
+      } else {
+        fs.writeFileSync(proguardPath, keepRules, 'utf8');
+      }
+
       return config;
     },
   ]);
+}
+
+function withAndroidReleaseOptimization(config) {
+  config = withGradleProperties(config, (config) => {
+    const props = [
+      ['reactNativeArchitectures', 'arm64-v8a'],
+      ['react.nativeArchitectures', 'arm64-v8a'],
+      ['android.enableMinifyInReleaseBuilds', 'true'],
+      ['android.enableProguardInReleaseBuilds', 'true'],
+      ['android.enableShrinkResourcesInReleaseBuilds', 'true'],
+      ['expo.useLegacyPackaging', 'true'],
+      ['android.useLegacyPackaging', 'true'],
+    ];
+    for (const [key, value] of props) {
+      AndroidConfig.BuildProperties.updateAndroidBuildProperty(
+        config.modResults,
+        key,
+        value
+      );
+    }
+    return config;
+  });
+
+  config = withAppBuildGradle(config, (config) => {
+    let contents = config.modResults.contents;
+
+    // Ensure release minification and resource shrinking default to true even if properties are evaluated inline
+    contents = contents.replace(
+      /\(findProperty\(['"]android\.enableMinifyInReleaseBuilds['"]\)\s*\?:\s*false\)/g,
+      "(findProperty('android.enableMinifyInReleaseBuilds') ?: true)"
+    );
+    contents = contents.replace(
+      /\(findProperty\(['"]android\.enableProguardInReleaseBuilds['"]\)\s*\?:\s*false\)/g,
+      "(findProperty('android.enableProguardInReleaseBuilds') ?: true)"
+    );
+    contents = contents.replace(
+      /\(findProperty\(['"]android\.enableShrinkResourcesInReleaseBuilds['"]\)\s*\?:\s*false\)/g,
+      "(findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: true)"
+    );
+    contents = contents.replace(
+      /\(findProperty\(['"]expo\.useLegacyPackaging['"]\)\s*\?:\s*['"]false['"]\)/g,
+      "(findProperty('expo.useLegacyPackaging') ?: 'true')"
+    );
+
+    if (!contents.includes('useLegacyPackaging')) {
+      contents = contents.replace(
+        /android\s*\{/,
+        `android {\n    packagingOptions {\n        jniLibs {\n            useLegacyPackaging true\n        }\n    }`
+      );
+    }
+
+    config.modResults.contents = contents;
+    return config;
+  });
+
+  return config;
 }
 
 function withAndroidDynamicClockFinalized(config) {
@@ -1204,10 +1275,12 @@ function withAndroidAlarmChannelNative(config) {
 
 module.exports = function withAlarmingAndroidConfig(config) {
   return withAndroidDynamicClockFinalized(
-    withAndroidAlarmChannelNative(
-      withAndroidAlarmMainApplication(
-        withAndroidAlarmFiles(
-          withAndroidAlarmPermissions(config)
+    withAndroidReleaseOptimization(
+      withAndroidAlarmChannelNative(
+        withAndroidAlarmMainApplication(
+          withAndroidAlarmFiles(
+            withAndroidAlarmPermissions(config)
+          )
         )
       )
     )

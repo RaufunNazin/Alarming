@@ -12,6 +12,14 @@ const LEGACY_LAST_SELECTED_TYPE_KEY = '@amour_last_selected_alarm_type_v1';
 
 const SETTINGS_STORAGE_KEY = '@alarming_settings_v1';
 const POWER_NAP_STORAGE_KEY = '@alarming_active_power_nap_v1';
+const UPDATE_META_STORAGE_KEY = '@alarming_update_meta_v1';
+
+export interface StoredUpdateMeta {
+  lastSeenVersion: string;
+  lastSeenUpdateId: string | null;
+  lastUpdatedAt: number;
+  pendingOtaToast?: boolean;
+}
 
 // Sequential write queue so rapid overlapping saves always persist in strict call order
 let storageWriteQueue: Promise<void> = Promise.resolve();
@@ -142,6 +150,25 @@ export const AlarmStorage = {
       } else {
         await AsyncStorage.setItem(POWER_NAP_STORAGE_KEY, payload);
       }
+    });
+  },
+
+  async getUpdateMeta(): Promise<StoredUpdateMeta | null> {
+    try {
+      const raw = await AsyncStorage.getItem(UPDATE_META_STORAGE_KEY);
+      if (raw) {
+        return JSON.parse(raw) as StoredUpdateMeta;
+      }
+    } catch (e) {
+      console.warn('Error reading update meta from storage:', e);
+    }
+    return null;
+  },
+
+  async saveUpdateMeta(meta: StoredUpdateMeta): Promise<void> {
+    const payload = JSON.stringify(meta);
+    return enqueueStorageWrite(async () => {
+      await AsyncStorage.setItem(UPDATE_META_STORAGE_KEY, payload);
     });
   },
 };

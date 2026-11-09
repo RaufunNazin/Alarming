@@ -40,9 +40,13 @@ interface AlarmState {
   toastActionLabel: string | null;
   onToastAction: (() => void) | null;
   pendingDeleteAlarm: { alarm: AlarmItem; index: number } | null;
+  lastUpdatedAt: number | null;
+  whatsNewModalVisible: boolean;
 
   // Actions
   initialize: () => Promise<void>;
+  setLastUpdatedAt: (ts: number) => void;
+  setWhatsNewModalVisible: (visible: boolean) => void;
   addAlarm: (alarmData: Omit<AlarmItem, 'id'>) => Promise<string>;
   startPowerNap: (minutes?: number, forceReplace?: boolean) => Promise<void>;
   cancelPowerNap: () => Promise<void>;
@@ -75,7 +79,12 @@ interface AlarmState {
     cycleDateStr?: string;
     isSnooze?: boolean;
   }) => void;
-  showToast: (message: string, actionLabel?: string, onAction?: () => void) => void;
+  showToast: (
+    message: string,
+    actionLabel?: string,
+    onAction?: () => void,
+    force?: boolean
+  ) => void;
   hideToast: () => void;
   rescheduleAllActiveAlarms: () => Promise<void>;
   checkAlarmTriggerTick: () => void;
@@ -131,9 +140,19 @@ export const useAlarmStore = create<AlarmState>((set, get) => {
     toastActionLabel: null,
     onToastAction: null,
     pendingDeleteAlarm: null,
+    lastUpdatedAt: null,
+    whatsNewModalVisible: false,
 
-    showToast: (message: string, actionLabel?: string, onAction?: () => void) => {
-      if (!actionLabel && !useSettingsStore.getState().showToastBanners) return;
+    setLastUpdatedAt: (ts: number) => set({ lastUpdatedAt: ts }),
+    setWhatsNewModalVisible: (visible: boolean) => set({ whatsNewModalVisible: visible }),
+
+    showToast: (
+      message: string,
+      actionLabel?: string,
+      onAction?: () => void,
+      force?: boolean
+    ) => {
+      if (!force && !actionLabel && !useSettingsStore.getState().showToastBanners) return;
       set({
         toastMessage: message,
         toastActionLabel: actionLabel ?? null,

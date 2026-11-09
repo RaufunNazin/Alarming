@@ -1,24 +1,22 @@
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState } from 'react-native';
 import { useFonts } from 'expo-font';
-import {
-  Caveat_400Regular,
-  Caveat_600SemiBold,
-  Caveat_700Bold,
-} from '@expo-google-fonts/caveat';
-import {
-  Outfit_300Light,
-  Outfit_400Regular,
-  Outfit_500Medium,
-  Outfit_600SemiBold,
-  Outfit_700Bold,
-} from '@expo-google-fonts/outfit';
+import { Caveat_400Regular } from '@expo-google-fonts/caveat/400Regular';
+import { Caveat_600SemiBold } from '@expo-google-fonts/caveat/600SemiBold';
+import { Caveat_700Bold } from '@expo-google-fonts/caveat/700Bold';
+import { Outfit_300Light } from '@expo-google-fonts/outfit/300Light';
+import { Outfit_400Regular } from '@expo-google-fonts/outfit/400Regular';
+import { Outfit_500Medium } from '@expo-google-fonts/outfit/500Medium';
+import { Outfit_600SemiBold } from '@expo-google-fonts/outfit/600SemiBold';
+import { Outfit_700Bold } from '@expo-google-fonts/outfit/700Bold';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Updates from 'expo-updates';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/core/theme';
 import { useSettingsStore } from './src/core/settings/settingsStore';
+import { AlarmStorage } from './src/core/storage/alarmStorage';
+import { TRANSLATIONS } from './src/core/i18n/translations';
 import { getActiveModule } from './src/modules/registry';
 import { useAlarmStore } from './src/modules/interval-alarm/store/alarmStore';
 import {
@@ -102,7 +100,7 @@ export default function App() {
   }, [language, isInitialized, rescheduleAllActiveAlarms]);
 
   useEffect(() => {
-    void useSettingsStore.getState().loadSettings();
+    const settingsPromise = useSettingsStore.getState().loadSettings();
 
     // Inject Google Web Fonts for instant zero-block rendering on Web
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -120,22 +118,93 @@ export default function App() {
     const initPromise = initialize();
     void initializeAlarmNotifications();
 
+    const currentVersion = Updates.runtimeVersion || '1.0.0';
+    const currentUpdateId = Updates.updateId || null;
+    const createdAtMs = Updates.createdAt ? Updates.createdAt.getTime() : null;
+    let isCheckingOta = false;
+
+    const evaluateAppliedUpdateOnLaunch = async () => {
+      try {
+        await Promise.all([settingsPromise, initPromise]);
+        const storedMeta = await AlarmStorage.getUpdateMeta();
+        const effectiveUpdatedAt = createdAtMs || storedMeta?.lastUpdatedAt || Date.now();
+        const store = useAlarmStore.getState();
+        store.setLastUpdatedAt(effectiveUpdatedAt);
+
+        const lang = useSettingsStore.getState().language;
+        const t = TRANSLATIONS[lang];
+
+        if (storedMeta && storedMeta.lastSeenVersion !== currentVersion) {
+          // Major / newer version update -> open Changelog modal automatically
+          const nexttimestamp = createdAtMs || Date.now();
+          store.setLastUpdatedAt(nexttimestamp);
+          await AlarmStorage.saveUpdateMeta({
+            lastSeenVersion: currentVersion,
+            lastSeenUpdateId: currentUpdateId,
+            lastUpdatedAt: nexttimestamp,
+            pendingOtaToast: false,
+          });
+          store.setWhatsNewModalVisible(true);
+        } else if (
+          storedMeta?.pendingOtaToast ||
+          (storedMeta && currentUpdateId && storedMeta.lastSeenUpdateId !== currentUpdateId) ||
+          (!storedMeta && Platform.OS !== 'web' && !__DEV__ && !Updates.isEmbeddedLaunch && currentUpdateId)
+        ) {
+          // Same-version OTA patch applied -> show toast only (no modal)
+          const nextTimestamp = createdAtMs || storedMeta?.lastUpdatedAt || Date.now();
+          store.setLastUpdatedAt(nextTimestamp);
+          await AlarmStorage.saveUpdateMeta({
+            lastSeenVersion: currentVersion,
+            lastSeenUpdateId: currentUpdateId,
+            lastUpdatedAt: nextTimestamp,
+            pendingOtaToast: false,
+          });
+          store.showToast(t.updateAppliedToast(currentVersion), undefined, undefined, true);
+        } else if (!storedMeta) {
+          await AlarmStorage.saveUpdateMeta({
+            lastSeenVersion: currentVersion,
+            lastSeenUpdateId: currentUpdateId,
+            lastUpdatedAt: effectiveUpdatedAt,
+            pendingOtaToast: false,
+          });
+        }
+      } catch {}
+    };
+
     const checkAndApplyOtaUpdate = async () => {
-      if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled) {
+      if (Platform.OS === 'web' || __DEV__ || !Updates.isEnabled || isCheckingOta) {
         return;
       }
+      isCheckingOta = true;
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
           await Updates.fetchUpdateAsync();
           if (!useAlarmStore.getState().activeRinging) {
+            const lang = useSettingsStore.getState().language;
+            const t = TRANSLATIONS[lang];
+            const nowTs = Date.now();
+            useAlarmStore.getState().setLastUpdatedAt(nowTs);
+            await AlarmStorage.saveUpdateMeta({
+              lastSeenVersion: currentVersion,
+              lastSeenUpdateId: currentUpdateId,
+              lastUpdatedAt: nowTs,
+              pendingOtaToast: true,
+            });
+            useAlarmStore.getState().showToast(t.updateApplyingToast, undefined, undefined, true);
+            await new Promise((resolve) => setTimeout(resolve, 700));
             await Updates.reloadAsync();
           }
         }
-      } catch {}
+      } catch {
+      } finally {
+        isCheckingOta = false;
+      }
     };
 
-    void checkAndApplyOtaUpdate();
+    void evaluateAppliedUpdateOnLaunch().then(() => {
+      void checkAndApplyOtaUpdate();
+    });
 
     const handledResponseKeys = new Set<string>();
 

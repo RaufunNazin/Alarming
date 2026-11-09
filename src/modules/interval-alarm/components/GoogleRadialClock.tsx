@@ -5,12 +5,12 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  Pressable,
   Animated,
   PanResponder,
 } from 'react-native';
 import { useTheme } from '../../../core/theme';
 import { useTranslation } from '../../../core/i18n/translations';
+import { safeHaptics } from '../../../core/haptics/safeHaptics';
 import { LiveDialDurationParts } from '../engine/intervalEngine';
 
 interface GoogleRadialClockProps {
@@ -276,11 +276,15 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
           : val + 12;
 
       if (newHour !== selectedHourRef.current) {
+        selectedHourRef.current = newHour;
+        safeHaptics.selectionAsync();
         onTimeChange(newHour, selectedMinuteRef.current);
       }
     } else {
       const val = Math.round(deg / 6) % 60;
       if (val !== selectedMinuteRef.current) {
+        selectedMinuteRef.current = val;
+        safeHaptics.selectionAsync();
         onTimeChange(selectedHourRef.current, val);
       }
     }
@@ -298,6 +302,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
   const onDialDragStateChangeRef = useRef(onDialDragStateChange);
   onDialDragStateChangeRef.current = onDialDragStateChange;
 
+  const handCircleRadiusRef = useRef(HAND_CIRCLE_RADIUS);
+  handCircleRadiusRef.current = HAND_CIRCLE_RADIUS;
+
   const currentAngleRad = (currentAngle - 90) * (Math.PI / 180);
   const thumbCenterX = RADIUS + Math.cos(currentAngleRad) * NUMBER_RADIUS;
   const thumbCenterY = RADIUS + Math.sin(currentAngleRad) * NUMBER_RADIUS;
@@ -310,92 +317,171 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
     locationX: 0,
     locationY: 0,
   });
+  const isDialDraggingRef = useRef(false);
+  const gestureRejectedAsScrollRef = useRef(false);
+  const ringHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // PanResponder attached ONLY to the active hand thumb circle so vertical scrolling over the clock face never mutates the time
-  const thumbPanResponder = useRef(
+  const clearRingHoldTimer = () => {
+    if (ringHoldTimerRef.current !== null) {
+      clearTimeout(ringHoldTimerRef.current);
+      ringHoldTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (ringHoldTimerRef.current !== null) {
+        clearTimeout(ringHoldTimerRef.current);
+        ringHoldTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Unified PanResponder with Smart Gesture Disambiguation:
+  // - Grabbing the active hand thumb immediately locks dial drag in any direction (0ms delay).
+  // - Tapping any number on the outer ring selects it on release.
+  // - Touching & sliding along the outer ring (or holding >=90ms) locks dial drag and tracks around the clock.
+  // - Touching the inner 35% dead-zone or swiping vertically (<90ms) yields to parent ScrollView without changing the time.
+  const dialPanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (evt) => {
-        onDialDragStateChangeRef.current?.(true);
-        const { pageX, pageY, locationX, locationY } = evt.nativeEvent;
+      onStartShouldSetPanResponder: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
         const currentR = radiusRef.current;
-        const thumbOriginX = thumbCenterRef.current.x - HAND_CIRCLE_RADIUS;
-        const thumbOriginY = thumbCenterRef.current.y - HAND_CIRCLE_RADIUS;
+        const thumbHitRadius = handCircleRadiusRef.current + 16;
+        const distFromThumb = Math.hypot(
+          locationX - thumbCenterRef.current.x,
+          locationY - thumbCenterRef.current.y
+        );
+        if (distFromThumb <= thumbHitRadius) {
+          return true;
+        }
+        const distFromCenter = Math.hypot(locationX - currentR, locationY - currentR);
+        return distFromCenter >= currentR * 0.35;
+      },
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        if (isDialDraggingRef.current) return true;
+        if (gestureRejectedAsScrollRef.current) return false;
+        const { dx, dy } = gestureState;
+        return Math.hypot(dx, dy) >= 6 && Math.abs(dx) >= Math.abs(dy) * 0.85;
+      },
+      onPanResponderTerminationRequest: () => !isDialDraggingRef.current,
+      onPanResponderGrant: (evt) => {
+        clearRingHoldTimer();
+        gestureRejectedAsScrollRef.current = false;
+
+        const { pageX, pageY, locationX, locationY } = evt.nativeEvent;
+        pressInPosRef.current = { pageX, pageY, locationX, locationY };
+
+        const currentR = radiusRef.current;
         clockCenterRef.current = {
-          x: pageX - (thumbOriginX + locationX) + currentR,
-          y: pageY - (thumbOriginY + locationY) + currentR,
+          x: pageX - locationX + currentR,
+          y: pageY - locationY + currentR,
         };
+
+        const thumbHitRadius = handCircleRadiusRef.current + 16;
+        const distFromThumb = Math.hypot(
+          locationX - thumbCenterRef.current.x,
+          locationY - thumbCenterRef.current.y
+        );
+
+        if (distFromThumb <= thumbHitRadius) {
+          isDialDraggingRef.current = true;
+          onDialDragStateChangeRef.current?.(true);
+        } else {
+          isDialDraggingRef.current = false;
+          ringHoldTimerRef.current = setTimeout(() => {
+            ringHoldTimerRef.current = null;
+            if (!gestureRejectedAsScrollRef.current && !isDialDraggingRef.current) {
+              isDialDraggingRef.current = true;
+              onDialDragStateChangeRef.current?.(true);
+              const dx = pressInPosRef.current.locationX - radiusRef.current;
+              const dy = pressInPosRef.current.locationY - radiusRef.current;
+              handleTouchOffsetRef.current(dx, dy);
+            }
+          }, 90);
+        }
       },
       onPanResponderMove: (_evt, gestureState) => {
+        if (gestureRejectedAsScrollRef.current) {
+          return;
+        }
+
+        if (isDialDraggingRef.current) {
+          const dx = gestureState.moveX - clockCenterRef.current.x;
+          const dy = gestureState.moveY - clockCenterRef.current.y;
+          handleTouchOffsetRef.current(dx, dy);
+          return;
+        }
+
+        const moveDist = Math.hypot(gestureState.dx, gestureState.dy);
+        if (moveDist < 6) {
+          return;
+        }
+
+        // Fast vertical swipe away from the active thumb -> yield to modal ScrollView
+        if (Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.35) {
+          clearRingHoldTimer();
+          gestureRejectedAsScrollRef.current = true;
+          return;
+        }
+
+        // Horizontal / tangential ring drag -> lock dial drag and snap hand to finger
+        clearRingHoldTimer();
+        isDialDraggingRef.current = true;
+        onDialDragStateChangeRef.current?.(true);
         const dx = gestureState.moveX - clockCenterRef.current.x;
         const dy = gestureState.moveY - clockCenterRef.current.y;
         handleTouchOffsetRef.current(dx, dy);
       },
-      onPanResponderRelease: () => {
-        onDialDragStateChangeRef.current?.(false);
-        if (modeRef.current === 'hour') {
-          handleModeChangeRef.current('minute');
-        } else if (modeRef.current === 'minute') {
-          onMinuteCompleteRef.current?.();
+      onPanResponderRelease: (_evt, gestureState) => {
+        clearRingHoldTimer();
+
+        if (gestureRejectedAsScrollRef.current) {
+          gestureRejectedAsScrollRef.current = false;
+          if (isDialDraggingRef.current) {
+            isDialDraggingRef.current = false;
+            onDialDragStateChangeRef.current?.(false);
+          }
+          return;
+        }
+
+        if (isDialDraggingRef.current) {
+          isDialDraggingRef.current = false;
+          onDialDragStateChangeRef.current?.(false);
+          if (modeRef.current === 'hour') {
+            handleModeChangeRef.current('minute');
+          } else if (modeRef.current === 'minute') {
+            onMinuteCompleteRef.current?.();
+          }
+          return;
+        }
+
+        // Confirmed tap on the outer number ring
+        const movedDist = Math.hypot(gestureState.dx, gestureState.dy);
+        if (movedDist <= 10) {
+          const currentR = radiusRef.current;
+          const dx = pressInPosRef.current.locationX - currentR;
+          const dy = pressInPosRef.current.locationY - currentR;
+          if (Math.hypot(dx, dy) >= currentR * 0.35) {
+            handleTouchOffsetRef.current(dx, dy);
+            if (modeRef.current === 'hour') {
+              handleModeChangeRef.current('minute');
+            } else if (modeRef.current === 'minute') {
+              onMinuteCompleteRef.current?.();
+            }
+          }
         }
       },
       onPanResponderTerminate: () => {
-        onDialDragStateChangeRef.current?.(false);
+        clearRingHoldTimer();
+        gestureRejectedAsScrollRef.current = false;
+        if (isDialDraggingRef.current) {
+          isDialDraggingRef.current = false;
+          onDialDragStateChangeRef.current?.(false);
+        }
       },
     })
   ).current;
-
-  const handleDialTapPressIn = (evt: {
-    nativeEvent: {
-      pageX: number;
-      pageY: number;
-      locationX: number;
-      locationY: number;
-    };
-  }) => {
-    const { pageX, pageY, locationX, locationY } = evt.nativeEvent;
-    pressInPosRef.current = { pageX, pageY, locationX, locationY };
-  };
-
-  const handleDialTapPress = (evt: {
-    nativeEvent: {
-      pageX: number;
-      pageY: number;
-      locationX: number;
-      locationY: number;
-    };
-  }) => {
-    const { pageX, pageY, locationX, locationY } = evt.nativeEvent;
-    const movedDist = Math.hypot(
-      (pageX || pressInPosRef.current.pageX) - pressInPosRef.current.pageX,
-      (pageY || pressInPosRef.current.pageY) - pressInPosRef.current.pageY
-    );
-    // Ignore if the user was scrolling
-    if (movedDist > 10) {
-      return;
-    }
-
-    const tapX = locationX ?? pressInPosRef.current.locationX;
-    const tapY = locationY ?? pressInPosRef.current.locationY;
-    const currentR = radiusRef.current;
-    const dx = tapX - currentR;
-    const dy = tapY - currentR;
-    // Ignore accidental taps right in the dead center of the clock face
-    if (Math.hypot(dx, dy) < currentR * 0.35) {
-      return;
-    }
-
-    handleTouchOffsetRef.current(dx, dy);
-    if (modeRef.current === 'hour') {
-      handleModeChangeRef.current('minute');
-    } else if (modeRef.current === 'minute') {
-      onMinuteCompleteRef.current?.();
-    }
-  };
 
   // Memoize dial number nodes so dragging the hand at 60-120fps only updates transform & clip position
   const inactiveNumberElements = useMemo(() => {
@@ -830,10 +916,9 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
               <View style={styles.handLineSpacer} />
             </View>
 
-            {/* Selection Circle at hand tip (Draggable Thumb) */}
+            {/* Selection Circle at hand tip */}
             <View
-              {...thumbPanResponder.panHandlers}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              pointerEvents="none"
               style={[
                 styles.handCircle,
                 {
@@ -844,7 +929,6 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
                   left: circleX,
                   top: circleY,
                   overflow: 'hidden',
-                  zIndex: 15,
                 },
               ]}
             >
@@ -869,11 +953,10 @@ export const GoogleRadialClock: React.FC<GoogleRadialClockProps> = ({
             />
           </Animated.View>
 
-          {/* Scroll-Safe Tap Overlay spanning clock face (yields to ScrollView on vertical swipe) */}
-          <Pressable
-            onPressIn={handleDialTapPressIn}
-            onPress={handleDialTapPress}
-            style={[styles.touchOverlay, { borderRadius: RADIUS, zIndex: 5 }]}
+          {/* Unified Smart-Disambiguated Touch Overlay spanning clock face */}
+          <View
+            {...dialPanResponder.panHandlers}
+            style={[styles.touchOverlay, { borderRadius: RADIUS }]}
           />
         </View>
       )}

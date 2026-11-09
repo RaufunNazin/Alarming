@@ -39,6 +39,54 @@ export function formatTime12hLocalized(
   };
 }
 
+const MONTHS_EN = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+const MONTHS_BN = [
+  'জানু',
+  'ফেব্রু',
+  'মার্চ',
+  'এপ্রিল',
+  'মে',
+  'জুন',
+  'জুলাই',
+  'আগস্ট',
+  'সেপ্টে',
+  'অক্টো',
+  'নভে',
+  'ডিসে',
+];
+
+export function formatUpdateTimestampLocalized(
+  timestampMs: number,
+  language: AppLanguage
+): string {
+  const d = new Date(timestampMs);
+  if (isNaN(d.getTime())) {
+    return language === 'bn' ? 'সর্বশেষ বিল্ড' : 'Latest build';
+  }
+  const monthIdx = d.getMonth();
+  const day = formatNumberLocalized(d.getDate(), language);
+  const year = formatNumberLocalized(d.getFullYear(), language);
+  const time12 = formatTime12hLocalized(d.getHours(), d.getMinutes(), language).full;
+  if (language === 'bn') {
+    return `${day} ${MONTHS_BN[monthIdx]} ${year}, ${time12}`;
+  }
+  return `${MONTHS_EN[monthIdx]} ${day}, ${year}, ${time12}`;
+}
+
 export const TRANSLATIONS = {
   en: {
     // Header & Home
@@ -205,7 +253,15 @@ export const TRANSLATIONS = {
     checkForUpdatesBtn: 'Check for Updates',
     checkingUpdatesBtn: 'Checking for Updates...',
     updateLatestToast: 'You are on the latest version (v1.0.0)',
+    updateLatestWithTimeToast: (version: string, dateStr: string) =>
+      `Latest version (v${version}) • Updated ${dateStr}`,
     updateDownloadingToast: 'Update found! Downloading & restarting...',
+    updateApplyingToast: 'Installing new update...',
+    updateAppliedToast: (version: string) => `Updated to latest v${version}`,
+    updateCardSubtitle: (version: string, dateStr: string) =>
+      `Latest v${version} • Updated ${dateStr}`,
+    lastUpdatedBadge: (dateStr: string) => `Last updated: ${dateStr}`,
+    whatsNewModalTitle: (version: string) => `What's New in v${version}`,
     updateDevModeToast: 'v1.0.0 • OTA updates run in release/APK builds',
     updateErrorToast: 'Could not check for updates right now',
     changelogBtn: 'Changelog (v1.0.0)',
@@ -232,8 +288,9 @@ export const TRANSLATIONS = {
         title: 'UI, Responsiveness & OTA Updates',
         items: [
           'Responsive scaling across 720p compact phones, standard phones, and tablets with full 3-button & gesture navigation safe areas.',
-          'Refined container corners, containerless ringing clock, compact AM/PM on alarm cards, full-card touch targets, and scroll-safe radial clock dial.',
-          'Over-The-Air (OTA) auto-update and manual update checker via Expo Updates.',
+          'Refined container corners, containerless ringing clock, compact AM/PM on alarm cards, full-card touch targets, and smart-disambiguated radial clock dial (full-ring & thumb drag + tap with scroll protection).',
+          'Full-bleed adaptive clock icon with edge-aligned red bezel and lightweight (~15 MB) arm64 production APK build.',
+          'Over-The-Air (OTA) auto-update with toast confirmation for patches, automatic changelog modal for new versions, and live update timestamp in Settings.',
         ],
       },
     ],
@@ -559,7 +616,17 @@ export const TRANSLATIONS = {
     checkForUpdatesBtn: 'আপডেট চেক করুন',
     checkingUpdatesBtn: 'আপডেট খোঁজা হচ্ছে...',
     updateLatestToast: 'আপনি সর্বশেষ ভার্সনে আছেন (v1.0.0)',
+    updateLatestWithTimeToast: (version: string, dateStr: string) =>
+      `সর্বশেষ ভার্সন (v${formatNumberLocalized(version, 'bn')}) • আপডেট: ${dateStr}`,
     updateDownloadingToast: 'নতুন আপডেট পাওয়া গেছে! ডাউনলোড হচ্ছে...',
+    updateApplyingToast: 'নতুন আপডেট ইনস্টল হচ্ছে...',
+    updateAppliedToast: (version: string) =>
+      `সর্বশেষ v${formatNumberLocalized(version, 'bn')}-এ আপডেট হয়েছে`,
+    updateCardSubtitle: (version: string, dateStr: string) =>
+      `সর্বশেষ v${formatNumberLocalized(version, 'bn')} • আপডেট: ${dateStr}`,
+    lastUpdatedBadge: (dateStr: string) => `সর্বশেষ আপডেট: ${dateStr}`,
+    whatsNewModalTitle: (version: string) =>
+      `নতুন কী আছে — v${formatNumberLocalized(version, 'bn')}`,
     updateDevModeToast: 'v1.0.0 • রিলিজ/APK বিল্ডে অটো-আপডেট কাজ করে',
     updateErrorToast: 'এই মুহূর্তে আপডেট চেক করা যায়নি',
     changelogBtn: 'চেঞ্জলগ (v1.0.0)',
@@ -586,8 +653,9 @@ export const TRANSLATIONS = {
         title: 'ডিজাইন, রেসপনসিভনেস ও আপডেট',
         items: [
           '৭২০পি ছোট স্ক্রিন, সাধারণ ফোন এবং ট্যাবলেটের জন্য রেসপনসিভ লেআউট ও নেভিগেশন বার সেফ এরিয়া।',
-          'মার্জিত কন্টেইনার কর্নার, কন্টেইনার ছাড়া পরিষ্কার রিংয়িং ঘড়ি, পুরো কার্ড জুড়ে ট্যাপ এরিয়া এবং স্ক্রল-সেফ ঘড়ির ডায়াল।',
-          'অ্যাপের ভেতর থেকেই সরাসরি অটো-আপডেট ও ম্যানুয়াল আপডেট চেক করার সুবিধা।',
+          'মার্জিত কন্টেইনার কর্নার, কন্টেইনার ছাড়া পরিষ্কার রিংয়িং ঘড়ি, পুরো কার্ড জুড়ে ট্যাপ এরিয়া এবং স্মার্ট ঘড়ির ডায়াল (ড্র্যাগ ও ট্যাপ সুবিধা এবং স্ক্রল সুরক্ষা)।',
+          'এজ-টু-এজ ফুল-ব্লিড ঘড়ি আইকন এবং হালকা (~১৫ মেগাবাইট) প্রোডাকশন এপিকে বিল্ড।',
+          'অ্যাপের ভেতর থেকেই অটো-আপডেট (ছোট আপডেটে টোস্ট মেসেজ এবং বড় ভার্সন আপডেটে চেঞ্জলগ পপআপ) ও সর্বশেষ আপডেটের সময় দেখার সুবিধা।',
         ],
       },
     ],

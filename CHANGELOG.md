@@ -31,10 +31,12 @@ All notable changes to **Alarming** are documented in this file.
   - Clean containerless alarm ringing screen with `"Time's up!"` fallback header, single top-header label display, and live wall-clock time digits paired with a compact `AM`/`PM` indicator.
   - Compact secondary `AM`/`PM` typography and active-of-total custom step counts on alarm cards so Window ranges fit cleanly on 720p displays without shrinking.
   - Full-surface clickable alarm cards (including all outer paddings), horizontal swipe gesture lock (`onPanResponderTerminationRequest`), and consistent modal heights when switching between `Single`, `Window`, and `Before/After` tabs.
-  - Scroll-safe radial clock dial (`GoogleRadialClock`) that allows vertical modal scrolling over the clock face without accidentally changing the alarm time, while keeping the clock hand thumb draggable, numbers tappable, and single-digit keypad input immediately synced.
+  - Smart-disambiguated radial clock dial (`GoogleRadialClock`) supporting instant hand-thumb dragging, full-ring dragging and tapping with haptic ticks, while yielding to vertical modal scrolling without accidentally changing the alarm time.
 - **Localization & Themes**:
   - Full **English** and **Bangla (বাংলা)** localization including localized numerals, 12-hour time formatting, localized lockscreen notification action buttons, and automatic rescheduling of active OS notifications when switching languages.
   - **Dark** and **Light** themes.
 - **Over-The-Air (OTA) Updates & Changelog**:
-  - Automatic background OTA updates and manual **Check for Updates** button in Settings powered by `expo-updates`.
-  - In-app **Changelog (`v1.0.0`)** viewer in Settings.
+  - Automatic background OTA updates with pre-reload feedback, post-update toast notifications for same-version patches, and automatic What's New changelog modal on major/version upgrades.
+  - Manual **Check for Updates** card in Settings displaying the latest version, last updated date & time (`Updates.createdAt` / stored update metadata), visible in-modal toast feedback, and automatic opening of the **Changelog (`v1.0.0`)** viewer.
+  - Optimized standalone Android production APK size (~15 MB) via `arm64-v8a` ABI targeting, compressed JNI native libraries (`useLegacyPackaging`), R8 code/resource shrinking with ProGuard keep rules, and tree-shaken font weight imports.
+  - Enlarged and edge-aligned the app icon's red outer ring to fill the Android adaptive icon mask without a dark outer border while preserving its thin ring stroke width.
